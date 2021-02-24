@@ -1,9 +1,17 @@
 use derive_more::From;
 use ffmpeg4::{format, DictionaryRef};
 use log::{debug, info, trace, warn};
+use path_slash::PathExt;
+use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc, time::SystemTime};
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    path::{Path, StripPrefixError},
+    rc::Rc,
+    time::SystemTime,
+};
 
 #[derive(Debug)]
 pub struct Index {
@@ -46,10 +54,22 @@ static ref TRACK_INFO_TRACK_PATTERN: Regex = Regex::new("(?P<track>\\d+)(/\\d+)?
 static ref FILENAME_STRIP_SUFFIX: Regex = Regex::new("(?P<name>.+)\\.[^.]+$").unwrap();
 static ref UNIQUE_NAME_ILLEGAL: Regex = Regex::new("[^a-zA-Z0-9]").unwrap();
 static ref ARTIST_SPLIT_PATTERN: Regex = Regex::new("( +& +| *, +)").unwrap();
+static ref PATH_SET: AsciiSet = NON_ALPHANUMERIC.remove(b'/').remove(b'-').remove(b'_').remove(b'.').remove(b'+');
 }
 
 impl Song {
-    fn parse<P: AsRef<Path>>(path: P) -> Result<Song, IndexingError> {
+    fn parse<P1: AsRef<Path>, P2: AsRef<Path>, S: AsRef<str>>(
+        path: P1,
+        base: P2,
+        files_url: S,
+    ) -> Result<Song, IndexingError> {
+        let stripped = path.as_ref().strip_prefix(base)?;
+        let url = format!(
+            "{}/{}",
+            files_url.as_ref(),
+            utf8_percent_encode(&stripped.to_slash_lossy(), &PATH_SET)
+        );
+
         let context = format::input(&path)?;
 
         trace!("Format Metadata:");
@@ -106,7 +126,7 @@ impl Song {
                 .collect(),
             track,
             // TODO: URL stuff
-            url: "".to_string(),
+            url,
         })
     }
 
@@ -138,8 +158,9 @@ impl Song {
 }
 
 impl Index {
-    pub async fn index<P: AsRef<Path>>(
+    pub async fn index<P: AsRef<Path>, S: AsRef<str>>(
         base_dir: P,
+        base_url: S,
         media_include: &RegexSet,
         media_exclude: &RegexSet,
         cover_include: &RegexSet,
@@ -156,7 +177,7 @@ impl Index {
         let mut previous_entry: Option<String> = None;
         let mut song_count = 0u32;
 
-        for dir in walkdir::WalkDir::new(base_dir).follow_links(true) {
+        for dir in walkdir::WalkDir::new(&base_dir).follow_links(true) {
             if let Ok(dir) = dir {
                 let path = dir.path();
                 let path_str = path.to_string_lossy();
@@ -166,7 +187,7 @@ impl Index {
                 if media_include.is_match(&path_str) && !media_exclude.is_match(&path_str) {
                     trace!("Found media file.");
 
-                    let song = Song::parse(&path)?;
+                    let song = Song::parse(&path, &base_dir, &base_url)?;
                     debug!("Loaded metadata: {:?}", &song);
                     index.insert_song(song);
                     song_count += 1;
@@ -362,4 +383,5 @@ impl Index {
 pub enum IndexingError {
     WalkdirError(walkdir::Error),
     FfmpegError(ffmpeg4::Error),
+    StripPrefixError(StripPrefixError),
 }

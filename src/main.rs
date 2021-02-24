@@ -6,6 +6,8 @@ use crate::{cdn::index::Index, config::Config};
 use actix_web::{App, HttpServer};
 use log::{debug, error};
 
+const FILES_URL: &str = "/cdn/files";
+
 mod generated_files {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
@@ -27,6 +29,7 @@ async fn main() -> std::io::Result<()> {
 
     let _index = Index::index(
         &base_dir,
+        FILES_URL,
         &config.media_include_patterns,
         &config.media_exclude_patterns,
         &config.cover_include_patterns,

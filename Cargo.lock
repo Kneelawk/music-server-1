@@ -1345,6 +1345,8 @@ dependencies = [
  "lazy_static",
  "log",
  "log4rs",
+ "path-slash",
+ "percent-encoding",
  "rand 0.8.3",
  "regex 1.4.3",
  "serde",

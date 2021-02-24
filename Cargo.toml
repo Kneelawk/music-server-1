@@ -16,6 +16,8 @@ ffmpeg4 = "^0.4.0"
 ffmpeg4-sys = "4.2.2"
 lazy_static = "^1.4.0"
 log = "^0.4.14"
+path-slash = "^0.1.4"
+percent-encoding = "^2.1.0"
 rand = "^0.8.2"
 regex = "^1.4.3"
 serde = "^1.0.119"
@@ -25,12 +27,12 @@ toml = "^0.5.8"
 uuid = "^0.8.2"
 walkdir = "^2.3.1"
 
+[dependencies.log4rs]
+version = "^1.0.0"
+
 [dependencies.tokio]
 version = "^1.2.0"
 features = ["sync"]
-
-[dependencies.log4rs]
-version = "^1.0.0"
 
 [build-dependencies]
 actix-web-static-files = "^3.0.5"
