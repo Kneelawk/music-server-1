@@ -11,8 +11,8 @@ pub fn init() {
             .create(true)
             .open(config_file_path)
             .unwrap();
-        write_cfg_file.write_all(DEFAULT_CONFIG);
+        write_cfg_file.write_all(DEFAULT_CONFIG).unwrap();
     }
 
-    log4rs::init_file(config_file_path, Default::default());
+    log4rs::init_file(config_file_path, Default::default()).unwrap();
 }

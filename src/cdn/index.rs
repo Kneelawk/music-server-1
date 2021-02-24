@@ -100,7 +100,10 @@ impl Song {
             title,
             album: album.unwrap_or("Unknown".to_string()),
             // TODO: multi-artist stuff
-            artists: ARTIST_SPLIT_PATTERN.split(&artist.unwrap_or("Unknown".to_string())).map(|s| s.to_string()).collect(),
+            artists: ARTIST_SPLIT_PATTERN
+                .split(&artist.unwrap_or("Unknown".to_string()))
+                .map(|s| s.to_string())
+                .collect(),
             track,
             // TODO: URL stuff
             url: "".to_string(),
@@ -231,7 +234,7 @@ impl Index {
             .to_ascii_lowercase();
 
         if self.albums.contains_key(&unique_name) {
-            let mut found = self
+            let found = self
                 .albums
                 .get(&unique_name)
                 .expect("BUG: Missing found artist")
@@ -254,7 +257,7 @@ impl Index {
             let mut index = 1u32;
             let mut found_name = format!("{}-{}", unique_name, index);
             while self.albums.contains_key(&found_name) {
-                let mut found = self
+                let found = self
                     .albums
                     .get(&found_name)
                     .expect("BUG: Missing found artist")
