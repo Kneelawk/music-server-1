@@ -1,0 +1,17 @@
+[general]
+base-dir = '/home/jedidiah/Music'
+media-include-patterns = [
+    '.*\.flac$',
+    '.*\.mp3$',
+    '.*\.ogg$',
+]
+media-exclude-patterns = []
+cover-include-patterns = [
+    '.*\.jpg$',
+    '.*\.png$',
+]
+cover-exclude-patterns = []
+bindings = [
+    '127.0.0.1:8980',
+    '192.168.1.15:8980',
+]
