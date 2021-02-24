@@ -159,10 +159,11 @@ impl Index {
         for dir in walkdir::WalkDir::new(base_dir).follow_links(true) {
             if let Ok(dir) = dir {
                 let path = dir.path();
-                previous_entry = Some(path.to_string_lossy().to_string());
-                trace!("Visiting {}", path.to_string_lossy());
+                let path_str = path.to_string_lossy();
+                previous_entry = Some(path_str.to_string());
+                trace!("Visiting {}", path_str);
 
-                if media_include.is_match(&path.to_string_lossy()) {
+                if media_include.is_match(&path_str) && !media_exclude.is_match(&path_str) {
                     trace!("Found media file.");
 
                     let song = Song::parse(&path)?;

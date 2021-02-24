@@ -5,7 +5,7 @@ media-include-patterns = [
     '.*\.mp3$',
     '.*\.ogg$',
 ]
-media-exclude-patterns = []
+media-exclude-patterns = ['/School-Computer/']
 cover-include-patterns = [
     '.*\.jpg$',
     '.*\.png$',
