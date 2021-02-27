@@ -1,10 +1,7 @@
 use crate::error::{ErrorKind::ConfigLoadError, Result, ResultExt};
-use derive_more::From;
-use log::{debug, info};
 use regex::RegexSet;
 use serde::{Deserialize, Serialize};
 use std::{
-    fmt::{Display, Formatter},
     fs::{File, OpenOptions},
     io::{Read, Write},
     path::Path,

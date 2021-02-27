@@ -1,3 +1,7 @@
+mod fancy_file;
+
+use crate::logging::fancy_file::FancyFileAppenderDeserializer;
+use log4rs::config::Deserializers;
 use std::{fs::OpenOptions, io::Write, path::Path};
 
 const DEFAULT_CONFIG_FILE: &str = "music-server-1.log4rs.yaml";
@@ -14,5 +18,8 @@ pub fn init() {
         write_cfg_file.write_all(DEFAULT_CONFIG).unwrap();
     }
 
-    log4rs::init_file(config_file_path, Default::default()).unwrap();
+    let mut deserializers = Deserializers::new();
+    deserializers.insert("fancy_file", FancyFileAppenderDeserializer);
+
+    log4rs::init_file(config_file_path, deserializers).unwrap();
 }
