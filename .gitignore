@@ -1,3 +1,7 @@
 /.idea/
 /logs/
 /target/
+
+# Ignore generated config files
+/music-server-1.log4rs.yaml
+/music-server-1.toml
