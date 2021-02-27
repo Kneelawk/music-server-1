@@ -1,3 +1,4 @@
+use crate::error::{ErrorKind::ConfigLoadError, Result, ResultExt};
 use derive_more::From;
 use log::{debug, info};
 use regex::RegexSet;
@@ -63,61 +64,49 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn load() -> Result<Config, ConfigLoadError> {
+    pub fn load() -> Result<Config> {
         info!("Loading config: {}", CONFIG_FILE_NAME);
 
         let cfg_path = Path::new(CONFIG_FILE_NAME);
 
         let cfg_raw: ConfigRaw = if cfg_path.exists() {
-            let mut cfg_file = File::open(cfg_path)?;
+            let mut cfg_file = File::open(cfg_path)
+                .chain_err(|| ConfigLoadError("Error opening config file".into()))?;
             let mut cfg_string = String::new();
-            cfg_file.read_to_string(&mut cfg_string)?;
-            toml::from_str(&cfg_string)?
+            cfg_file
+                .read_to_string(&mut cfg_string)
+                .chain_err(|| ConfigLoadError("Error reading config file".into()))?;
+            toml::from_str(&cfg_string)
+                .chain_err(|| ConfigLoadError("Error decoding config".into()))?
         } else {
             info!("Loading blank cfg file...");
-            toml::from_str("")?
+            toml::from_str("").chain_err(|| ConfigLoadError("Error loading blank config".into()))?
         };
 
         debug!("Writing config file...");
-        let new_cfg_string = toml::to_string_pretty(&cfg_raw)?;
-        let mut cfg_file = OpenOptions::new().write(true).create(true).open(cfg_path)?;
-        cfg_file.write_all(new_cfg_string.as_bytes())?;
+        let new_cfg_string = toml::to_string_pretty(&cfg_raw)
+            .chain_err(|| ConfigLoadError("Error re-encoding config file".into()))?;
+        let mut cfg_file = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .open(cfg_path)
+            .chain_err(|| ConfigLoadError("Error opening config file for re-encoding".into()))?;
+        cfg_file
+            .write_all(new_cfg_string.as_bytes())
+            .chain_err(|| ConfigLoadError("Error writing to config file for re-encoding".into()))?;
 
         Ok(Config {
             base_dir: cfg_raw.general.base_dir,
-            media_include_patterns: RegexSet::new(cfg_raw.general.media_include_patterns)?,
-            media_exclude_patterns: RegexSet::new(cfg_raw.general.media_exclude_patterns)?,
-            cover_include_patterns: RegexSet::new(cfg_raw.general.cover_include_patterns)?,
-            cover_exclude_patterns: RegexSet::new(cfg_raw.general.cover_exclude_patterns)?,
+            media_include_patterns: RegexSet::new(cfg_raw.general.media_include_patterns)
+                .chain_err(|| ConfigLoadError("Error decoding regex".into()))?,
+            media_exclude_patterns: RegexSet::new(cfg_raw.general.media_exclude_patterns)
+                .chain_err(|| ConfigLoadError("Error decoding regex".into()))?,
+            cover_include_patterns: RegexSet::new(cfg_raw.general.cover_include_patterns)
+                .chain_err(|| ConfigLoadError("Error decoding regex".into()))?,
+            cover_exclude_patterns: RegexSet::new(cfg_raw.general.cover_exclude_patterns)
+                .chain_err(|| ConfigLoadError("Error decoding regex".into()))?,
             bindings: cfg_raw.general.bindings,
         })
-    }
-}
-
-#[derive(Debug, From)]
-pub enum ConfigLoadError {
-    IOError(std::io::Error),
-    DeserializeError(toml::de::Error),
-    SerializeError(toml::ser::Error),
-    RegexError(regex::Error),
-}
-
-impl Display for ConfigLoadError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ConfigLoadError::IOError(e) => {
-                write!(
-                    f,
-                    "Unable to open config file: '{}': {}",
-                    CONFIG_FILE_NAME, e
-                )
-            }
-            ConfigLoadError::DeserializeError(_) => write!(f, "Unable to parse config file."),
-            ConfigLoadError::RegexError(_) => write!(f, "Regex error in config file."),
-            ConfigLoadError::SerializeError(_) => {
-                write!(f, "Error while re-serializing the config file.")
-            }
-        }
     }
 }
 

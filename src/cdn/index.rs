@@ -1,17 +1,10 @@
-use derive_more::From;
+use crate::error::{ErrorKind, Result, ResultExt};
 use ffmpeg4::{format, DictionaryRef};
-use log::{debug, info, trace, warn};
 use path_slash::PathExt;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    path::{Path, StripPrefixError},
-    rc::Rc,
-    time::SystemTime,
-};
+use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc, time::SystemTime};
 
 #[derive(Debug)]
 pub struct Index {
@@ -62,15 +55,19 @@ impl Song {
         path: P1,
         base: P2,
         files_url: S,
-    ) -> Result<Song, IndexingError> {
-        let stripped = path.as_ref().strip_prefix(base)?;
+    ) -> Result<Song> {
+        let stripped = path.as_ref().strip_prefix(base).chain_err(|| {
+            ErrorKind::IndexingError(Some(path.as_ref().to_string_lossy().to_string()))
+        })?;
         let url = format!(
             "{}/{}",
             files_url.as_ref(),
             utf8_percent_encode(&stripped.to_slash_lossy(), &PATH_SET)
         );
 
-        let context = format::input(&path)?;
+        let context = format::input(&path).chain_err(|| {
+            ErrorKind::IndexingError(Some(path.as_ref().to_string_lossy().to_string()))
+        })?;
 
         trace!("Format Metadata:");
         let metadata = context.metadata();
@@ -165,7 +162,7 @@ impl Index {
         media_exclude: &RegexSet,
         cover_include: &RegexSet,
         cover_exclude: &RegexSet,
-    ) -> Result<Index, IndexingError> {
+    ) -> Result<Index> {
         info!("Indexing {}", base_dir.as_ref().to_str().unwrap());
         let start_time = SystemTime::now();
 
@@ -378,11 +375,4 @@ impl Index {
 
         unique_name
     }
-}
-
-#[derive(Debug, From)]
-pub enum IndexingError {
-    WalkdirError(walkdir::Error),
-    FfmpegError(ffmpeg4::Error),
-    StripPrefixError(StripPrefixError),
 }

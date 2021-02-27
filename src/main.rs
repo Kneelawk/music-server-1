@@ -13,8 +13,10 @@ mod logging;
 use crate::{
     cdn::index::Index,
     config::Config,
+    error::{Result, ResultExt},
 };
 use actix_web::{App, HttpServer};
+use std::process::exit;
 
 const FILES_URL: &str = "/cdn/files";
 
@@ -22,19 +24,8 @@ mod generated_files {
     include!(concat!(env!("OUT_DIR"), "/generated.rs"));
 }
 
-#[actix_web::main]
-async fn main() -> std::io::Result<()> {
-    dotenv::dotenv().ok();
-    logging::init();
-
-    let config = match Config::load() {
-        Ok(it) => it,
-        Err(err) => {
-            error!("Error loading config file: {}", err);
-            debug!("Error loading config file: {:?}", err);
-            return Ok(());
-        }
-    };
+async fn run() -> Result<()> {
+    let config = Config::load()?;
 
     let base_dir = config.base_dir.clone();
 
@@ -45,8 +36,7 @@ async fn main() -> std::io::Result<()> {
         &config.media_exclude_patterns,
         &config.cover_include_patterns,
         &config.cover_exclude_patterns,
-    )
-    .unwrap();
+    )?;
 
     let mut server = HttpServer::new(move || {
         let generated = generated_files::generate();
@@ -56,8 +46,24 @@ async fn main() -> std::io::Result<()> {
     });
 
     for binding in config.bindings.iter() {
-        server = server.bind(binding.clone())?;
+        server = server
+            .bind(binding.clone())
+            .chain_err(|| "Error binding the actix server")?;
     }
 
-    server.run().await
+    server
+        .run()
+        .await
+        .chain_err(|| "Error starting the actix server")
+}
+
+#[actix_web::main]
+async fn main() {
+    dotenv::dotenv().ok();
+    logging::init();
+
+    if let Err(ref e) = run().await {
+        e.log();
+        exit(1);
+    }
 }

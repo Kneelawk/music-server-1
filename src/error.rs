@@ -5,10 +5,16 @@ use actix_web::{
 };
 use error_chain::ChainedError;
 use serde::Serialize;
-use std::{fmt::Debug, result};
+use std::{borrow::Cow, fmt::Debug, result};
 
 error_chain! {
     errors {
+        IndexingError(path: Option<String>) {
+            display("Indexing Error at {:?}", path)
+        }
+        ConfigLoadError(msg: Cow<'static, str>) {
+            display("Error loading config: {}", msg)
+        }
     }
 }
 
@@ -42,10 +48,7 @@ impl Error {
     }
 
     pub fn log(&self) {
-        error!(
-            "Internal Server Error: {}",
-            self.display_chain().to_string()
-        );
+        error!("{}", self.display_chain().to_string());
     }
 }
 
