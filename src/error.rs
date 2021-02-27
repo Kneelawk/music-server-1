@@ -29,10 +29,7 @@ impl ResponseError for Error {
     fn error_response(&self) -> HttpResponse {
         HttpResponseBuilder::new(self.status_code())
             .set_header(header::CONTENT_TYPE, "application/json; charset=utf-8")
-            .body(
-                serde_json::to_string(&result::Result::<(), JsonError>::Err(self.handle()))
-                    .unwrap(),
-            )
+            .json(&result::Result::<(), JsonError>::Err(self.handle()))
     }
 }
 
