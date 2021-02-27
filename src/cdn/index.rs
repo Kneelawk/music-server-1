@@ -1,24 +1,27 @@
 use crate::error::{ErrorKind, Result, ResultExt};
+use actix_web::App;
 use ffmpeg4::{format, DictionaryRef};
+use futures::{stream, StreamExt};
 use path_slash::PathExt;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
-use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc, time::SystemTime};
+use std::{collections::HashMap, path::Path, sync::Arc, time::SystemTime};
+use tokio::sync::RwLock;
 
 #[derive(Debug)]
 pub struct Index {
-    artists: HashMap<String, Rc<RefCell<Artist>>>,
-    artist_list: Vec<Rc<RefCell<Artist>>>,
-    albums: HashMap<String, Rc<RefCell<Album>>>,
-    album_list: Vec<Rc<RefCell<Album>>>,
+    artists: HashMap<String, Arc<RwLock<Artist>>>,
+    artist_list: Vec<Arc<RwLock<Artist>>>,
+    albums: HashMap<String, Arc<RwLock<Album>>>,
+    album_list: Vec<Arc<RwLock<Album>>>,
 }
 
 #[derive(Debug)]
 pub struct Artist {
     name: String,
     unique_name: String,
-    albums: HashMap<String, Rc<RefCell<Album>>>,
+    albums: HashMap<String, Arc<RwLock<Album>>>,
     cover_url: Option<String>,
 }
 
@@ -28,8 +31,8 @@ pub struct Album {
     unique_name: String,
     artists: Vec<String>,
     artist_unique_names: Vec<String>,
-    songs: Vec<Option<Rc<RefCell<Song>>>>,
-    songs_by_name: HashMap<String, Rc<RefCell<Song>>>,
+    songs: Vec<Option<Arc<RwLock<Song>>>>,
+    songs_by_name: HashMap<String, Arc<RwLock<Song>>>,
     cover_url: Option<String>,
     tracked: bool,
 }
@@ -157,7 +160,7 @@ impl Song {
 }
 
 impl Index {
-    pub fn index<P: AsRef<Path>, S: AsRef<str>>(
+    pub async fn index<P: AsRef<Path>, S: AsRef<str>>(
         base_dir: P,
         base_url: S,
         media_include: &RegexSet,
@@ -189,7 +192,7 @@ impl Index {
 
                         let song = Song::parse(&path, &base_dir, &base_url)?;
                         debug!("Loaded metadata: {:?}", &song);
-                        index.insert_song(song);
+                        index.insert_song(song).await;
                         song_count += 1;
                     }
                 }
@@ -207,14 +210,20 @@ impl Index {
         }
 
         debug!("Sorting artists...");
-        index
-            .artist_list
-            .sort_by_key(|rc| rc.borrow().unique_name.clone());
+        index.artist_list.reserve(index.artists.len());
+        let mut artist_names = index.artists.keys().collect::<Vec<_>>();
+        artist_names.sort();
+        for artist_name in artist_names {
+            index.artist_list.push(index.artists[artist_name].clone());
+        }
 
         debug!("Sorting albums...");
-        index
-            .album_list
-            .sort_by_key(|rc| rc.borrow().unique_name.clone());
+        index.album_list.reserve(index.albums.len());
+        let mut album_names = index.albums.keys().collect::<Vec<_>>();
+        album_names.sort();
+        for album_name in album_names {
+            index.album_list.push(index.albums[album_name].clone());
+        }
 
         info!(
             "Indexed {} songs in {:?}",
@@ -226,30 +235,28 @@ impl Index {
 
         debug!(
             "Albums: {:?}",
-            &index
-                .album_list
-                .iter()
-                .map(|rc| rc.borrow().unique_name.clone())
+            &stream::iter(&index.album_list)
+                .then(|rc| async move { rc.read().await.unique_name.clone() })
                 .collect::<Vec<_>>()
+                .await
         );
 
         info!("{} Artists loaded.", index.artists.len());
 
         debug!(
             "Artists: {:?}",
-            &index
-                .artist_list
-                .iter()
-                .map(|rc| rc.borrow().unique_name.clone())
+            &stream::iter(&index.artist_list)
+                .then(|rc| async move { rc.read().await.unique_name.clone() })
                 .collect::<Vec<_>>()
+                .await
         );
 
         Ok(index)
     }
 
-    fn insert_song(&mut self, song: Song) {
-        let album = self.get_or_insert_album(&song.album, &song.artists);
-        let mut album_borrowed = album.borrow_mut();
+    async fn insert_song(&mut self, song: Song) {
+        let album = self.get_or_insert_album(&song.album, &song.artists).await;
+        let mut album_borrowed = album.write().await;
 
         if let Some(track) = song.track {
             album_borrowed.tracked = true;
@@ -259,20 +266,20 @@ impl Index {
             }
 
             let song_name = song.unique_name.clone();
-            let song = Rc::new(RefCell::new(song));
+            let song = Arc::new(RwLock::new(song));
 
             album_borrowed.songs[(track - 1) as usize] = Some(song.clone());
             album_borrowed.songs_by_name.insert(song_name, song);
         } else {
             let song_name = song.unique_name.clone();
-            let song = Rc::new(RefCell::new(song));
+            let song = Arc::new(RwLock::new(song));
 
             album_borrowed.songs.push(Some(song.clone()));
             album_borrowed.songs_by_name.insert(song_name, song);
         }
     }
 
-    fn get_or_insert_album(&mut self, name: &str, artists: &[String]) -> Rc<RefCell<Album>> {
+    async fn get_or_insert_album(&mut self, name: &str, artists: &[String]) -> Arc<RwLock<Album>> {
         let mut unique_name = UNIQUE_NAME_ILLEGAL
             .replace_all(name, "-")
             .to_ascii_lowercase();
@@ -283,14 +290,14 @@ impl Index {
                 .get(&unique_name)
                 .expect("BUG: Missing found artist")
                 .clone();
-            let mut borrowed = found.borrow_mut();
+            let mut borrowed = found.write().await;
             if borrowed.name == name {
                 for artist_name in artists {
                     if !borrowed.artists.contains(artist_name) {
                         borrowed.artists.push(artist_name.clone());
                         borrowed
                             .artist_unique_names
-                            .push(self.get_or_insert_artist(artist_name));
+                            .push(self.get_or_insert_artist(artist_name).await);
                     }
                 }
 
@@ -306,14 +313,14 @@ impl Index {
                     .get(&found_name)
                     .expect("BUG: Missing found artist")
                     .clone();
-                let mut borrowed = found.borrow_mut();
+                let mut borrowed = found.write().await;
                 if borrowed.name == name {
                     for artist_name in artists {
                         if !borrowed.artists.contains(artist_name) {
                             borrowed.artists.push(artist_name.clone());
                             borrowed
                                 .artist_unique_names
-                                .push(self.get_or_insert_artist(artist_name));
+                                .push(self.get_or_insert_artist(artist_name).await);
                         }
                     }
 
@@ -327,12 +334,12 @@ impl Index {
             unique_name = found_name;
         }
 
-        let artist_unique_names: Vec<String> = artists
-            .iter()
-            .map(|artist| self.get_or_insert_artist(artist))
-            .collect();
+        let mut artist_unique_names = vec![];
+        for artist in artists.iter() {
+            artist_unique_names.push(self.get_or_insert_artist(artist).await);
+        }
 
-        let album = Rc::new(RefCell::new(Album {
+        let album = Arc::new(RwLock::new(Album {
             name: name.to_string(),
             unique_name: unique_name.clone(),
             artists: artists.to_vec(),
@@ -344,12 +351,12 @@ impl Index {
         }));
 
         self.albums.insert(unique_name.clone(), album.clone());
-        self.album_list.push(album.clone());
         for artist_unique_name in artist_unique_names {
             self.artists
                 .get_mut(&artist_unique_name)
                 .expect("BUG: Missing newly inserted artist")
-                .borrow_mut()
+                .write()
+                .await
                 .albums
                 .insert(unique_name.clone(), album.clone());
         }
@@ -357,7 +364,7 @@ impl Index {
         album
     }
 
-    fn get_or_insert_artist(&mut self, name: &str) -> String {
+    async fn get_or_insert_artist(&mut self, name: &str) -> String {
         let mut unique_name = UNIQUE_NAME_ILLEGAL
             .replace_all(name, "-")
             .to_ascii_lowercase();
@@ -367,7 +374,7 @@ impl Index {
                 .artists
                 .get(&unique_name)
                 .expect("BUG: Missing found artist");
-            let borrowed = found.borrow();
+            let borrowed = found.read().await;
             if borrowed.name == name {
                 return borrowed.unique_name.clone();
             }
@@ -379,7 +386,7 @@ impl Index {
                     .artists
                     .get(&found_name)
                     .expect("BUG: Missing found artist");
-                let borrowed = found.borrow();
+                let borrowed = found.read().await;
                 if borrowed.name == name {
                     return borrowed.unique_name.clone();
                 }
@@ -390,7 +397,7 @@ impl Index {
             unique_name = found_name;
         }
 
-        let artist = Rc::new(RefCell::new(Artist {
+        let artist = Arc::new(RwLock::new(Artist {
             name: name.to_string(),
             unique_name: unique_name.clone(),
             albums: Default::default(),
@@ -399,8 +406,11 @@ impl Index {
 
         // we couldn't find the artist, so we'll insert a new one
         self.artists.insert(unique_name.clone(), artist.clone());
-        self.artist_list.push(artist);
 
         unique_name
     }
+}
+
+pub fn apply_services<T, B>(app: App<T, B>) -> App<T, B> {
+    app
 }

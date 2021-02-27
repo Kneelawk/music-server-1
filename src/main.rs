@@ -9,13 +9,14 @@ mod cdn;
 mod config;
 mod error;
 mod logging;
+mod util;
 
 use crate::{
     cdn::index::Index,
     config::Config,
     error::{Result, ResultExt},
 };
-use actix_web::{App, HttpServer};
+use actix_web::{web::Data, App, HttpServer};
 use std::process::exit;
 
 const FILES_URL: &str = "/cdn/files";
@@ -29,20 +30,27 @@ async fn run() -> Result<()> {
 
     let base_dir = config.base_dir.clone();
 
-    let _index = Index::index(
+    let index = Index::index(
         &base_dir,
         FILES_URL,
         &config.media_include_patterns,
         &config.media_exclude_patterns,
         &config.cover_include_patterns,
         &config.cover_exclude_patterns,
-    )?;
+    ).await?;
+    let index_data = Data::new(index);
 
     let mut server = HttpServer::new(move || {
         let generated = generated_files::generate();
-        App::new().service(
+        let index_data = index_data.clone();
+
+        let mut app = App::new().app_data(index_data);
+        app = cdn::apply_services(app);
+        app = app.service(
             actix_web_static_files::ResourceFiles::new("/", generated).resolve_not_found_to_root(),
-        )
+        );
+
+        app
     });
 
     for binding in config.bindings.iter() {
