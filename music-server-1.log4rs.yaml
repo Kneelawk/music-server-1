@@ -32,3 +32,8 @@ root:
   appenders:
     - console
     - log_file
+
+loggers:
+  # This conflicts with internal error logging
+  actix_http::response:
+    level: off

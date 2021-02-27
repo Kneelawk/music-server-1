@@ -430,7 +430,7 @@ dependencies = [
  "cfg-if 0.1.10",
  "clang-sys",
  "clap",
- "env_logger 0.6.2",
+ "env_logger",
  "lazy_static",
  "log",
  "peeking_take_while",
@@ -753,16 +753,13 @@ dependencies = [
 ]
 
 [[package]]
-name = "env_logger"
-version = "0.8.3"
+name = "error-chain"
+version = "0.12.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17392a012ea30ef05a610aa97dfb49496e71c9f676b27879922ea5bdf60d9d3f"
+checksum = "2d2f06b9cac1506ece98fe3231e3cc9c4410ec3d5b1f24ae1c8946f0742cdefc"
 dependencies = [
- "atty",
- "humantime 2.1.0",
- "log",
- "regex 1.4.3",
- "termcolor",
+ "backtrace",
+ "version_check 0.9.2",
 ]
 
 [[package]]
@@ -1339,7 +1336,7 @@ dependencies = [
  "derive_more",
  "dirs",
  "dotenv",
- "env_logger 0.8.3",
+ "error-chain",
  "ffmpeg4",
  "ffmpeg4-sys",
  "lazy_static",

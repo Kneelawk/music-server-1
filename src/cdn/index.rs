@@ -158,7 +158,7 @@ impl Song {
 }
 
 impl Index {
-    pub async fn index<P: AsRef<Path>, S: AsRef<str>>(
+    pub fn index<P: AsRef<Path>, S: AsRef<str>>(
         base_dir: P,
         base_url: S,
         media_include: &RegexSet,
@@ -174,33 +174,34 @@ impl Index {
             albums: Default::default(),
         };
 
-        let mut previous_entry: Option<String> = None;
         let mut song_count = 0u32;
 
         for dir in walkdir::WalkDir::new(&base_dir).follow_links(true) {
-            if let Ok(dir) = dir {
-                let path = dir.path();
-                let path_str = path.to_string_lossy();
-                previous_entry = Some(path_str.to_string());
-                trace!("Visiting {}", path_str);
+            match dir {
+                Ok(dir) => {
+                    let path = dir.path();
+                    let path_str = path.to_string_lossy();
+                    trace!("Visiting {}", path_str);
 
-                if media_include.is_match(&path_str) && !media_exclude.is_match(&path_str) {
-                    trace!("Found media file.");
+                    if media_include.is_match(&path_str) && !media_exclude.is_match(&path_str) {
+                        trace!("Found media file.");
 
-                    let song = Song::parse(&path, &base_dir, &base_url)?;
-                    debug!("Loaded metadata: {:?}", &song);
-                    index.insert_song(song);
-                    song_count += 1;
-                }
-            } else {
-                warn!(
-                    "Encountered invalid file while scanning. Previous entry: {}",
-                    if let Some(entry) = &previous_entry {
-                        entry
-                    } else {
-                        "Unknown"
+                        let song = Song::parse(&path, &base_dir, &base_url)?;
+                        debug!("Loaded metadata: {:?}", &song);
+                        index.insert_song(song);
+                        song_count += 1;
                     }
-                );
+                }
+                Err(err) => {
+                    warn!(
+                        "Encountered invalid file while scanning. Path: {}",
+                        if let Some(entry) = err.path() {
+                            entry.to_string_lossy()
+                        } else {
+                            "Unknown".into()
+                        }
+                    );
+                }
             }
         }
 

@@ -1,10 +1,20 @@
+#[macro_use]
+extern crate error_chain;
+#[macro_use]
+extern crate actix_web;
+#[macro_use]
+extern crate log;
+
 mod cdn;
 mod config;
+mod error;
 mod logging;
 
-use crate::{cdn::index::Index, config::Config};
+use crate::{
+    cdn::index::Index,
+    config::Config,
+};
 use actix_web::{App, HttpServer};
-use log::{debug, error};
 
 const FILES_URL: &str = "/cdn/files";
 
@@ -14,6 +24,7 @@ mod generated_files {
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
+    dotenv::dotenv().ok();
     logging::init();
 
     let config = match Config::load() {
@@ -35,7 +46,6 @@ async fn main() -> std::io::Result<()> {
         &config.cover_include_patterns,
         &config.cover_exclude_patterns,
     )
-    .await
     .unwrap();
 
     let mut server = HttpServer::new(move || {
