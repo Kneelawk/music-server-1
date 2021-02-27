@@ -8,8 +8,10 @@ use std::{cell::RefCell, collections::HashMap, path::Path, rc::Rc, time::SystemT
 
 #[derive(Debug)]
 pub struct Index {
-    artists: HashMap<String, Artist>,
+    artists: HashMap<String, Rc<RefCell<Artist>>>,
+    artist_list: Vec<Rc<RefCell<Artist>>>,
     albums: HashMap<String, Rc<RefCell<Album>>>,
+    album_list: Vec<Rc<RefCell<Album>>>,
 }
 
 #[derive(Debug)]
@@ -163,12 +165,14 @@ impl Index {
         cover_include: &RegexSet,
         cover_exclude: &RegexSet,
     ) -> Result<Index> {
-        info!("Indexing {}", base_dir.as_ref().to_str().unwrap());
+        info!("Indexing {}", base_dir.as_ref().to_string_lossy());
         let start_time = SystemTime::now();
 
         let mut index = Index {
             artists: Default::default(),
+            artist_list: Default::default(),
             albums: Default::default(),
+            album_list: Default::default(),
         };
 
         let mut song_count = 0u32;
@@ -202,6 +206,16 @@ impl Index {
             }
         }
 
+        debug!("Sorting artists...");
+        index
+            .artist_list
+            .sort_by_key(|rc| rc.borrow().unique_name.clone());
+
+        debug!("Sorting albums...");
+        index
+            .album_list
+            .sort_by_key(|rc| rc.borrow().unique_name.clone());
+
         info!(
             "Indexed {} songs in {:?}",
             song_count,
@@ -210,15 +224,25 @@ impl Index {
 
         info!("{} Albums loaded.", index.albums.len());
 
-        let mut albums = index.albums.keys().collect::<Vec<_>>();
-        albums.sort();
-        trace!("Albums: {:?}", albums);
+        debug!(
+            "Albums: {:?}",
+            &index
+                .album_list
+                .iter()
+                .map(|rc| rc.borrow().unique_name.clone())
+                .collect::<Vec<_>>()
+        );
 
         info!("{} Artists loaded.", index.artists.len());
 
-        let mut artists = index.artists.keys().collect::<Vec<_>>();
-        artists.sort();
-        trace!("Artists: {:?}", artists);
+        debug!(
+            "Artists: {:?}",
+            &index
+                .artist_list
+                .iter()
+                .map(|rc| rc.borrow().unique_name.clone())
+                .collect::<Vec<_>>()
+        );
 
         Ok(index)
     }
@@ -320,10 +344,12 @@ impl Index {
         }));
 
         self.albums.insert(unique_name.clone(), album.clone());
+        self.album_list.push(album.clone());
         for artist_unique_name in artist_unique_names {
             self.artists
                 .get_mut(&artist_unique_name)
                 .expect("BUG: Missing newly inserted artist")
+                .borrow_mut()
                 .albums
                 .insert(unique_name.clone(), album.clone());
         }
@@ -337,23 +363,25 @@ impl Index {
             .to_ascii_lowercase();
 
         if self.artists.contains_key(&unique_name) {
-            let mut found = self
+            let found = self
                 .artists
                 .get(&unique_name)
                 .expect("BUG: Missing found artist");
-            if found.name == name {
-                return found.unique_name.clone();
+            let borrowed = found.borrow();
+            if borrowed.name == name {
+                return borrowed.unique_name.clone();
             }
 
             let mut index = 1u32;
             let mut found_name = format!("{}-{}", unique_name, index);
             while self.artists.contains_key(&found_name) {
-                found = self
+                let found = self
                     .artists
                     .get(&found_name)
                     .expect("BUG: Missing found artist");
-                if found.name == name {
-                    return found.unique_name.clone();
+                let borrowed = found.borrow();
+                if borrowed.name == name {
+                    return borrowed.unique_name.clone();
                 }
 
                 index += 1;
@@ -362,16 +390,16 @@ impl Index {
             unique_name = found_name;
         }
 
+        let artist = Rc::new(RefCell::new(Artist {
+            name: name.to_string(),
+            unique_name: unique_name.clone(),
+            albums: Default::default(),
+            cover_url: None,
+        }));
+
         // we couldn't find the artist, so we'll insert a new one
-        self.artists.insert(
-            unique_name.clone(),
-            Artist {
-                name: name.to_string(),
-                unique_name: unique_name.clone(),
-                albums: Default::default(),
-                cover_url: None,
-            },
-        );
+        self.artists.insert(unique_name.clone(), artist.clone());
+        self.artist_list.push(artist);
 
         unique_name
     }
