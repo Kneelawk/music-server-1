@@ -1,22 +1,23 @@
-use actix_service::ServiceFactory;
+pub mod files;
+pub mod index;
+
+use crate::config::Config;
+use actix_files::Files;
+use actix_service::{Service, ServiceFactory, Transform};
 use actix_web::{
     body::MessageBody,
     dev::{ServiceRequest, ServiceResponse},
-    App,
+    web, App, Scope,
+};
+use futures::{future, future::Ready, Future};
+use std::{
+    pin::Pin,
+    result,
+    task::{Context, Poll},
 };
 
-pub mod index;
-
-pub fn apply_services<T, B>(app: App<T, B>) -> App<T, B>
-where
-    B: MessageBody,
-    T: ServiceFactory<
-        Config = (),
-        Request = ServiceRequest,
-        Response = ServiceResponse<B>,
-        Error = actix_web::error::Error,
-        InitError = (),
-    >,
-{
-    index::apply_services(app)
+pub fn apply_services(config: &Config) -> Scope {
+    web::scope("/cdn")
+        .service(index::apply_services())
+        .service(files::apply_services(config))
 }

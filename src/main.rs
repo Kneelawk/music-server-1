@@ -41,15 +41,18 @@ async fn run() -> Result<()> {
         &config.media_exclude_patterns,
         &config.cover_include_patterns,
         &config.cover_exclude_patterns,
-    ).await?;
+    )
+    .await?;
     let index_data = Data::new(index);
 
+    let server_config = config.clone();
     let mut server = HttpServer::new(move || {
         let generated = generated_files::generate();
         let index_data = index_data.clone();
+        let config = server_config.clone();
 
         let mut app = App::new().app_data(index_data);
-        app = cdn::apply_services(app);
+        app = app.service(cdn::apply_services(&config));
         app = app.service(
             actix_web_static_files::ResourceFiles::new("/", generated).resolve_not_found_to_root(),
         );

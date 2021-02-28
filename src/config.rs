@@ -6,6 +6,7 @@ use std::{
     io::{Read, Write},
     path::Path,
 };
+use std::path::PathBuf;
 
 const CONFIG_FILE_NAME: &str = "music-server-1.toml";
 
@@ -52,7 +53,7 @@ impl Default for ConfigGeneral {
 
 #[derive(Debug, Clone)]
 pub struct Config {
-    pub base_dir: String,
+    pub base_dir: PathBuf,
     pub media_include_patterns: RegexSet,
     pub media_exclude_patterns: RegexSet,
     pub cover_include_patterns: RegexSet,
@@ -93,7 +94,7 @@ impl Config {
             .chain_err(|| ConfigLoadError("Error writing to config file for re-encoding".into()))?;
 
         Ok(Config {
-            base_dir: cfg_raw.general.base_dir,
+            base_dir: cfg_raw.general.base_dir.into(),
             media_include_patterns: RegexSet::new(cfg_raw.general.media_include_patterns)
                 .chain_err(|| ConfigLoadError("Error decoding regex".into()))?,
             media_exclude_patterns: RegexSet::new(cfg_raw.general.media_exclude_patterns)

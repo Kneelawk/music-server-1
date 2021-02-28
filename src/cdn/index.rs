@@ -4,7 +4,7 @@ use actix_web::{
     body::MessageBody,
     dev::{HttpResponseBuilder, ServiceRequest, ServiceResponse},
     http::StatusCode,
-    web, App, HttpResponse,
+    web, App, HttpResponse, Scope,
 };
 use ffmpeg4::{format, DictionaryRef};
 use futures::{stream, StreamExt};
@@ -449,25 +449,16 @@ fn sanitize(s: &str) -> String {
     .to_ascii_lowercase()
 }
 
-pub fn apply_services<T, B>(app: App<T, B>) -> App<T, B>
-where
-    B: MessageBody,
-    T: ServiceFactory<
-        Config = (),
-        Request = ServiceRequest,
-        Response = ServiceResponse<B>,
-        Error = actix_web::error::Error,
-        InitError = (),
-    >,
-{
-    app.service(get_albums)
+pub fn apply_services() -> Scope {
+    web::scope("/index")
+        .service(get_albums)
         .service(get_artists)
         .service(get_album)
         .service(get_artist)
         .service(get_song)
 }
 
-#[get("/cdn/index/albums")]
+#[get("/albums")]
 async fn get_albums(index: web::Data<Index>) -> HttpResponse {
     let mut albums = vec![];
     for album in index.album_list.iter() {
@@ -478,7 +469,7 @@ async fn get_albums(index: web::Data<Index>) -> HttpResponse {
     HttpResponseBuilder::new(StatusCode::OK).json(albums)
 }
 
-#[get("/cdn/index/artists")]
+#[get("/artists")]
 async fn get_artists(index: web::Data<Index>) -> HttpResponse {
     let mut artists = vec![];
     for artist in index.artist_list.iter() {
@@ -489,7 +480,7 @@ async fn get_artists(index: web::Data<Index>) -> HttpResponse {
     HttpResponseBuilder::new(StatusCode::OK).json(artists)
 }
 
-#[get("/cdn/index/album/{album_name}")]
+#[get("/album/{album_name}")]
 async fn get_album(
     index: web::Data<Index>,
     web::Path(album_name): web::Path<String>,
@@ -503,7 +494,7 @@ async fn get_album(
     }
 }
 
-#[get("/cdn/index/artist/{artist_name}")]
+#[get("/artist/{artist_name}")]
 async fn get_artist(
     index: web::Data<Index>,
     web::Path(artist_name): web::Path<String>,
@@ -517,7 +508,7 @@ async fn get_artist(
     }
 }
 
-#[get("/cdn/index/album/{album_name}/{song_name}")]
+#[get("/album/{album_name}/{song_name}")]
 async fn get_song(
     index: web::Data<Index>,
     web::Path((album_name, song_name)): web::Path<(String, String)>,

@@ -16,6 +16,8 @@ error_chain! {
             display("Error loading config: {}", msg)
         }
         NoSuchResource {}
+        UriSegmentError {}
+        FilesLimiterError {}
     }
 }
 
@@ -23,26 +25,33 @@ impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
         // custom error response status codes here
         match self {
+            Error(ErrorKind::FilesLimiterError, ..) => StatusCode::NOT_FOUND,
+            Error(ErrorKind::UriSegmentError, ..) => StatusCode::BAD_REQUEST,
             Error(ErrorKind::NoSuchResource, ..) => StatusCode::NOT_FOUND,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
 
     fn error_response(&self) -> HttpResponse {
-        HttpResponseBuilder::new(self.status_code())
-            .set_header(header::CONTENT_TYPE, "application/json; charset=utf-8")
-            .json(&result::Result::<(), JsonError>::Err(self.handle()))
+        if let Some(json) = self.handle() {
+            HttpResponseBuilder::new(self.status_code())
+                .json(&result::Result::<(), JsonError>::Err(json))
+        } else {
+            HttpResponse::new(self.status_code())
+        }
     }
 }
 
 impl Error {
-    fn handle(&self) -> JsonError {
+    fn handle(&self) -> Option<JsonError> {
         // custom error response json errors here
         match self {
-            Error(ErrorKind::NoSuchResource, ..) => JsonError::NoSuchResource,
+            Error(ErrorKind::FilesLimiterError, ..) => None,
+            Error(ErrorKind::UriSegmentError, ..) => None,
+            Error(ErrorKind::NoSuchResource, ..) => Some(JsonError::NoSuchResource),
             _ => {
                 self.log();
-                JsonError::InternalServerError
+                Some(JsonError::InternalServerError)
             }
         }
     }
