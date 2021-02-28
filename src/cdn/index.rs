@@ -58,7 +58,6 @@ pub struct Song {
 lazy_static::lazy_static! {
 static ref TRACK_INFO_TRACK_PATTERN: Regex = Regex::new("(?P<track>\\d+)(/\\d+)?").unwrap();
 static ref FILENAME_STRIP_SUFFIX: Regex = Regex::new("(?P<name>.+)\\.[^.]+$").unwrap();
-static ref UNIQUE_NAME_ILLEGAL: Regex = Regex::new("[^a-zA-Z0-9]").unwrap();
 static ref ARTIST_SPLIT_PATTERN: Regex = Regex::new("( +& +| *, +)").unwrap();
 static ref PATH_SET: AsciiSet = NON_ALPHANUMERIC.remove(b'/').remove(b'-').remove(b'_').remove(b'.').remove(b'+');
 }
@@ -124,9 +123,7 @@ impl Song {
         let title = title.unwrap_or("Unknown".to_string());
 
         Ok(Song {
-            unique_name: UNIQUE_NAME_ILLEGAL
-                .replace_all(&title, "-")
-                .to_ascii_lowercase(),
+            unique_name: sanitize(&title),
             title,
             album: album.unwrap_or("Unknown".to_string()),
             album_unique_name: "".to_string(),
@@ -303,9 +300,7 @@ impl Index {
     }
 
     async fn get_or_insert_album(&mut self, name: &str, artists: &[String]) -> Arc<RwLock<Album>> {
-        let mut unique_name = UNIQUE_NAME_ILLEGAL
-            .replace_all(name, "-")
-            .to_ascii_lowercase();
+        let mut unique_name = sanitize(name);
 
         if self.albums.contains_key(&unique_name) {
             let found = self
@@ -402,9 +397,7 @@ impl Index {
     }
 
     async fn get_or_insert_artist(&mut self, name: &str) -> String {
-        let mut unique_name = UNIQUE_NAME_ILLEGAL
-            .replace_all(name, "-")
-            .to_ascii_lowercase();
+        let mut unique_name = sanitize(name);
 
         if self.artists.contains_key(&unique_name) {
             let found = self
@@ -446,6 +439,14 @@ impl Index {
 
         unique_name
     }
+}
+
+fn sanitize(s: &str) -> String {
+    s.replace(
+        |c: char| !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')),
+        "-",
+    )
+    .to_ascii_lowercase()
 }
 
 pub fn apply_services<T, B>(app: App<T, B>) -> App<T, B>
