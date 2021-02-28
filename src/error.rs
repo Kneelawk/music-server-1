@@ -15,6 +15,7 @@ error_chain! {
         ConfigLoadError(msg: Cow<'static, str>) {
             display("Error loading config: {}", msg)
         }
+        NoSuchResource {}
     }
 }
 
@@ -22,6 +23,7 @@ impl ResponseError for Error {
     fn status_code(&self) -> StatusCode {
         // custom error response status codes here
         match self {
+            Error(ErrorKind::NoSuchResource, ..) => StatusCode::NOT_FOUND,
             _ => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -37,6 +39,7 @@ impl Error {
     fn handle(&self) -> JsonError {
         // custom error response json errors here
         match self {
+            Error(ErrorKind::NoSuchResource, ..) => JsonError::NoSuchResource,
             _ => {
                 self.log();
                 JsonError::InternalServerError
@@ -53,4 +56,5 @@ impl Error {
 #[serde(tag = "type")]
 pub enum JsonError {
     InternalServerError,
+    NoSuchResource,
 }
