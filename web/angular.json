@@ -63,6 +63,36 @@
                   "maximumError": "4kb"
                 }
               ]
+            },
+            "serve": {
+              "fileReplacements": [
+                {
+                  "replace": "src/environments/environment.ts",
+                  "with": "src/environments/environment.serve.ts"
+                }
+              ],
+              "optimization": false,
+              "outputHashing": "none",
+              "sourceMap": true,
+              "namedChunks": true,
+              "extractLicenses": true,
+              "vendorChunk": false,
+              "buildOptimizer": false,
+              "budgets": [
+                {
+                  "type": "initial",
+                  "maximumWarning": "500kb",
+                  "maximumError": "1mb"
+                },
+                {
+                  "type": "anyComponentStyle",
+                  "maximumWarning": "2kb",
+                  "maximumError": "4kb"
+                }
+              ],
+              "allowedCommonJsDependencies": [
+                "zone.js"
+              ]
             }
           }
         },
@@ -74,6 +104,9 @@
           "configurations": {
             "production": {
               "browserTarget": "music-server:build:production"
+            },
+            "serve": {
+              "browserTarget": "music-server:build:serve"
             }
           }
         },
