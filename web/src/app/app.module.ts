@@ -11,6 +11,7 @@ import { LayoutModule } from '@angular/cdk/layout';
 import { MatSidenavModule } from '@angular/material/sidenav';
 import { MatListModule } from '@angular/material/list';
 import { NavigationComponent } from './navigation/navigation.component';
+import { HttpClientModule } from "@angular/common/http";
 
 @NgModule({
   declarations: [
@@ -26,7 +27,8 @@ import { NavigationComponent } from './navigation/navigation.component';
     MatIconModule,
     LayoutModule,
     MatSidenavModule,
-    MatListModule
+    MatListModule,
+    HttpClientModule,
   ],
   providers: [],
   bootstrap: [AppComponent]
