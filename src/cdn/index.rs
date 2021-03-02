@@ -1,11 +1,8 @@
-use crate::error::{ErrorKind, Result, ResultExt};
-use actix_service::ServiceFactory;
-use actix_web::{
-    body::MessageBody,
-    dev::{HttpResponseBuilder, ServiceRequest, ServiceResponse},
-    http::StatusCode,
-    web, App, HttpResponse, Scope,
+use crate::{
+    error::{ErrorKind, Result, ResultExt},
+    util::w_ok,
 };
+use actix_web::{dev::HttpResponseBuilder, http::StatusCode, web, HttpResponse, Scope};
 use ffmpeg4::{format, DictionaryRef};
 use futures::{stream, StreamExt};
 use path_slash::PathExt;
@@ -466,7 +463,7 @@ async fn get_albums(index: web::Data<Index>) -> HttpResponse {
         albums.push(AlbumJson::from_album(&album).await);
     }
 
-    HttpResponseBuilder::new(StatusCode::OK).json(albums)
+    HttpResponseBuilder::new(StatusCode::OK).json(w_ok(albums))
 }
 
 #[get("/artists")]
@@ -477,7 +474,7 @@ async fn get_artists(index: web::Data<Index>) -> HttpResponse {
         artists.push(ArtistJson::from_artist(&artist).await);
     }
 
-    HttpResponseBuilder::new(StatusCode::OK).json(artists)
+    HttpResponseBuilder::new(StatusCode::OK).json(w_ok(artists))
 }
 
 #[get("/album/{album_name}")]
@@ -488,7 +485,10 @@ async fn get_album(
     if let Some(album) = index.albums.get(&album_name) {
         let album = album.read().await;
 
-        Ok(HttpResponseBuilder::new(StatusCode::OK).json(AlbumJson::from_album(&album).await))
+        Ok(
+            HttpResponseBuilder::new(StatusCode::OK)
+                .json(w_ok(AlbumJson::from_album(&album).await)),
+        )
     } else {
         bail!(ErrorKind::NoSuchResource);
     }
@@ -502,7 +502,8 @@ async fn get_artist(
     if let Some(artist) = index.artists.get(&artist_name) {
         let artist = artist.read().await;
 
-        Ok(HttpResponseBuilder::new(StatusCode::OK).json(ArtistJson::from_artist(&artist).await))
+        Ok(HttpResponseBuilder::new(StatusCode::OK)
+            .json(w_ok(ArtistJson::from_artist(&artist).await)))
     } else {
         bail!(ErrorKind::NoSuchResource);
     }
@@ -516,7 +517,7 @@ async fn get_song(
     if let Some(album) = index.albums.get(&album_name) {
         let album = album.read().await;
         if let Some(song) = album.songs_by_name.get(&song_name) {
-            Ok(HttpResponseBuilder::new(StatusCode::OK).json(song.read().await.clone()))
+            Ok(HttpResponseBuilder::new(StatusCode::OK).json(w_ok(song.read().await.clone())))
         } else {
             bail!(ErrorKind::NoSuchResource)
         }

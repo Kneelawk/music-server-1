@@ -1,11 +1,8 @@
-use actix_web::{
-    dev::HttpResponseBuilder,
-    http::{header, StatusCode},
-    HttpResponse, ResponseError,
-};
+use crate::util::w_err;
+use actix_web::{dev::HttpResponseBuilder, http::StatusCode, HttpResponse, ResponseError};
 use error_chain::ChainedError;
 use serde::Serialize;
-use std::{borrow::Cow, fmt::Debug, result};
+use std::{borrow::Cow, fmt::Debug};
 
 error_chain! {
     errors {
@@ -34,8 +31,7 @@ impl ResponseError for Error {
 
     fn error_response(&self) -> HttpResponse {
         if let Some(json) = self.handle() {
-            HttpResponseBuilder::new(self.status_code())
-                .json(&result::Result::<(), JsonError>::Err(json))
+            HttpResponseBuilder::new(self.status_code()).json(&w_err(json))
         } else {
             HttpResponse::new(self.status_code())
         }

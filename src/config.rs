@@ -4,9 +4,8 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{File, OpenOptions},
     io::{Read, Write},
-    path::Path,
+    path::{Path, PathBuf},
 };
-use std::path::PathBuf;
 
 const CONFIG_FILE_NAME: &str = "music-server-1.toml";
 

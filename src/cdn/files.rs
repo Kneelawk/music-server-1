@@ -6,10 +6,8 @@ use actix_files::Files;
 use actix_service::{Service, ServiceFactory, Transform};
 use actix_web::{
     dev::{ServiceRequest, ServiceResponse},
-    http::StatusCode,
-    web, HttpResponse, ResponseError, Scope,
+    web, Scope,
 };
-use derive_more::Display;
 use futures::{
     future,
     future::{ok, Either, Ready},
