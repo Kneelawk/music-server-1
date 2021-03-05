@@ -19,3 +19,11 @@
 .sidenav-toolbar-desktop {
   background: #616161;
 }
+
+.nav-top-toolbar {
+  box-shadow: 0 2px 2px #222222;
+}
+
+.nav-side-toolbar {
+  box-shadow: 2px 0 2px #222222;
+}

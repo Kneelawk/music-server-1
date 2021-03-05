@@ -1,5 +1,5 @@
 <mat-sidenav-container class="sidenav-container">
-  <mat-sidenav #drawer class="sidenav" fixedInViewport
+  <mat-sidenav #drawer class="sidenav nav-side-toolbar" fixedInViewport
                [attr.role]="(isHandset$ | async) ? 'dialog' : 'navigation'"
                [mode]="(isHandset$ | async) ? 'over' : 'side'"
                [opened]="(isHandset$ | async) === false">
@@ -21,7 +21,7 @@
     </mat-nav-list>
   </mat-sidenav>
   <mat-sidenav-content>
-    <mat-toolbar color="primary">
+    <mat-toolbar color="primary" class="nav-top-toolbar">
       <button
         type="button"
         aria-label="Toggle sidenav"
@@ -42,10 +42,5 @@
         </mat-card>
       </mat-grid-tile>
     </mat-grid-list>
-<!--    <ul *ngIf="(albums$ | async)?.length != 0">-->
-<!--      <li *ngFor="let album of albums$ | async">-->
-<!--        <span>{{album.name}}</span>-->
-<!--      </li>-->
-<!--    </ul>-->
   </mat-sidenav-content>
 </mat-sidenav-container>
