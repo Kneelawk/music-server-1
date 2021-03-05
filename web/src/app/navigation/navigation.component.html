@@ -32,6 +32,20 @@
       </button>
       <span>Music Server 1</span>
     </mat-toolbar>
-    <p>Content here...</p>
+    <mat-grid-list cols="4" rowHeight="100px">
+      <mat-grid-tile *ngFor="let album of albums$ | async">
+        <mat-card>
+          <mat-card-header>
+            <mat-card-title>{{album.name}}</mat-card-title>
+            <mat-card-subtitle>{{album.artists.slice(0, 2).join(", ")}}<span *ngIf="album.artists.length > 2">, ...</span></mat-card-subtitle>
+          </mat-card-header>
+        </mat-card>
+      </mat-grid-tile>
+    </mat-grid-list>
+<!--    <ul *ngIf="(albums$ | async)?.length != 0">-->
+<!--      <li *ngFor="let album of albums$ | async">-->
+<!--        <span>{{album.name}}</span>-->
+<!--      </li>-->
+<!--    </ul>-->
   </mat-sidenav-content>
 </mat-sidenav-container>
