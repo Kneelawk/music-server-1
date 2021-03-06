@@ -3,7 +3,7 @@
                [attr.role]="(isHandset$ | async) ? 'dialog' : 'navigation'"
                [mode]="(isHandset$ | async) ? 'over' : 'side'"
                [opened]="(isHandset$ | async) === false">
-    <mat-toolbar color="primary" [class.sidenav-toolbar-desktop]="!(isHandset$ | async)">
+    <mat-toolbar [class.sidenav-toolbar-desktop]="!(isHandset$ | async)">
       <button
         type="button"
         aria-label="Toggle sidenav"
