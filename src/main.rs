@@ -20,9 +20,8 @@ use crate::{
     config::Config,
     error::{Result, ResultExt},
 };
-use actix_web::{web::Data, App, HttpServer};
+use actix_web::{middleware::DefaultHeaders, web::Data, App, HttpServer};
 use std::process::exit;
-use actix_web::middleware::DefaultHeaders;
 
 const FILES_URL: &str = "/cdn/files";
 
@@ -52,11 +51,14 @@ async fn run() -> Result<()> {
         let index_data = index_data.clone();
         let config = server_config.clone();
 
+        #[allow(unused_mut)]
         let mut app = App::new().app_data(index_data);
 
         // allows CORS from development server to api server
         #[cfg(debug_assertions)]
-        let mut app = app.wrap(DefaultHeaders::new().header("Access-Control-Allow-Origin", "http://localhost:4200"));
+        let mut app = app.wrap(
+            DefaultHeaders::new().header("Access-Control-Allow-Origin", "http://localhost:4200"),
+        );
 
         app = app.service(cdn::apply_services(&config));
         app = app.service(

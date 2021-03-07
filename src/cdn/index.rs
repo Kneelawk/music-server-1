@@ -9,8 +9,19 @@ use path_slash::PathExt;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, path::Path, sync::Arc, time::SystemTime};
+use std::{
+    collections::HashMap,
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::SystemTime,
+};
 use tokio::sync::RwLock;
+
+macro_rules! indexing_error {
+    ($path:expr, $desc:expr) => {
+        || ErrorKind::IndexingError(Some($path.as_ref().to_string_lossy().to_string()), $desc)
+    };
+}
 
 #[derive(Debug)]
 pub struct Index {
@@ -36,6 +47,7 @@ pub struct Album {
     songs: Vec<Option<Arc<RwLock<Song>>>>,
     songs_by_name: HashMap<String, Arc<RwLock<Song>>>,
     cover_url: Option<String>,
+    cover_rating: u32,
     tracked: bool,
 }
 
@@ -46,6 +58,7 @@ pub struct Song {
     album: AlbumRef,
     artists: Vec<ArtistRef>,
     track: Option<u32>,
+    cover_url: Option<String>,
     url: String,
 }
 
@@ -75,23 +88,16 @@ static ref PATH_SET: AsciiSet = NON_ALPHANUMERIC.remove(b'/').remove(b'-').remov
 }
 
 impl Song {
-    fn parse<P1: AsRef<Path>, P2: AsRef<Path>, S: AsRef<str>>(
-        path: P1,
-        base: P2,
-        files_url: S,
+    async fn parse<P1: AsRef<Path>, P2: AsRef<Path>, S: AsRef<str>>(
+        path: &P1,
+        base: &P2,
+        files_url: &S,
     ) -> Result<Song> {
-        let stripped = path.as_ref().strip_prefix(base).chain_err(|| {
-            ErrorKind::IndexingError(Some(path.as_ref().to_string_lossy().to_string()))
-        })?;
-        let url = format!(
-            "{}/{}",
-            files_url.as_ref(),
-            utf8_percent_encode(&stripped.to_slash_lossy(), &PATH_SET)
-        );
+        let url = find_url(&path, base, files_url)?;
 
-        let context = format::input(&path).chain_err(|| {
-            ErrorKind::IndexingError(Some(path.as_ref().to_string_lossy().to_string()))
-        })?;
+        // TODO: make this async... probably with blocking()
+        let context =
+            format::input(&path).chain_err(indexing_error!(path, "probing media file"))?;
 
         trace!("Format Metadata:");
         let metadata = context.metadata();
@@ -149,6 +155,7 @@ impl Song {
                 })
                 .collect(),
             track,
+            cover_url: None,
             url,
         })
     }
@@ -200,6 +207,10 @@ impl Index {
         };
 
         let mut song_count = 0u32;
+        let mut previous_parent = None;
+        let mut previous_song_parent = None;
+        let mut previous_album = None;
+        let mut found_covers: Vec<PathBuf> = vec![];
 
         for dir in walkdir::WalkDir::new(&base_dir).follow_links(true) {
             match dir {
@@ -208,13 +219,54 @@ impl Index {
                     let path_str = path.to_string_lossy();
                     trace!("Visiting {}", path_str);
 
+                    // don't keep covers from other directories
+                    if !paths_eq(&previous_parent, &path.parent()) {
+                        found_covers.clear();
+                    }
+                    previous_parent = path.parent().map(|p| p.to_path_buf());
+
                     if media_include.is_match(&path_str) && !media_exclude.is_match(&path_str) {
                         trace!("Found media file.");
 
-                        let song = Song::parse(&path, &base_dir, &base_url)?;
+                        let song = Song::parse(&path, &base_dir, &base_url).await?;
                         debug!("Loaded metadata: {:?}", &song);
-                        index.insert_song(song).await;
+                        let song = index.insert_song(song).await;
                         song_count += 1;
+
+                        previous_song_parent = path.parent().map(|p| p.to_path_buf());
+                        previous_album = Some(song.read().await.album.unique_name.clone());
+
+                        // if we found the cover first, then this vec should be populated
+                        for cover in found_covers.drain(..) {
+                            let album = song.read().await.album.unique_name.clone();
+                            trace!(
+                                "Inserting cover into new album: {}: {}",
+                                &album,
+                                cover.to_string_lossy()
+                            );
+                            index
+                                .insert_cover(&cover, &base_dir, &base_url, &album)
+                                .await?;
+                        }
+                    } else if cover_include.is_match(&path_str)
+                        && !cover_exclude.is_match(&path_str)
+                    {
+                        trace!("Found cover file.");
+
+                        // if we found songs first, then the album should have been created already
+                        if paths_eq(&previous_song_parent, &path.parent()) {
+                            let previous_album = previous_album.as_ref().expect(
+                                "BUG: previous_song_parent was Some but previous_album was None",
+                            );
+                            trace!("Editing existing album: {}: {}", previous_album, &path_str);
+                            index
+                                .insert_cover(&path, &base_dir, &base_url, previous_album)
+                                .await?;
+                        } else {
+                            // we haven't found any songs for this album yet
+                            trace!("Found cover: {} for new album.", &path_str);
+                            found_covers.push(path.to_path_buf());
+                        }
                     }
                 }
                 Err(err) => {
@@ -275,7 +327,7 @@ impl Index {
         Ok(index)
     }
 
-    async fn insert_song(&mut self, mut song: Song) {
+    async fn insert_song(&mut self, mut song: Song) -> Arc<RwLock<Song>> {
         for artist in song.artists.iter_mut() {
             artist.unique_name = self.get_or_insert_artist(&artist.name).await;
         }
@@ -285,6 +337,10 @@ impl Index {
             .await;
 
         song.album.unique_name = album.read().await.unique_name.clone();
+
+        if let Some(cover_url) = &album.read().await.cover_url {
+            song.cover_url = Some(cover_url.clone());
+        }
 
         if let Some(track) = song.track {
             album.write().await.tracked = true;
@@ -297,13 +353,25 @@ impl Index {
             let song = Arc::new(RwLock::new(song));
 
             album.write().await.songs[(track - 1) as usize] = Some(song.clone());
-            album.write().await.songs_by_name.insert(song_name, song);
+            album
+                .write()
+                .await
+                .songs_by_name
+                .insert(song_name, song.clone());
+
+            song
         } else {
             let song_name = song.unique_name.clone();
             let song = Arc::new(RwLock::new(song));
 
             album.write().await.songs.push(Some(song.clone()));
-            album.write().await.songs_by_name.insert(song_name, song);
+            album
+                .write()
+                .await
+                .songs_by_name
+                .insert(song_name, song.clone());
+
+            song
         }
     }
 
@@ -385,6 +453,7 @@ impl Index {
             songs: Default::default(),
             songs_by_name: Default::default(),
             cover_url: None,
+            cover_rating: 0,
             tracked: false,
         }));
 
@@ -445,6 +514,57 @@ impl Index {
 
         unique_name
     }
+
+    async fn insert_cover<P1: AsRef<Path>, P2: AsRef<Path>, S1: AsRef<str>, S2: AsRef<str>>(
+        &mut self,
+        path: &P1,
+        base: &P2,
+        files_url: &S1,
+        album_unique_name: &S2,
+    ) -> Result<()> {
+        if self.albums.contains_key(album_unique_name.as_ref()) {
+            let mut album = self.albums[album_unique_name.as_ref()].write().await;
+            let rating = Index::rate_cover(&path)?;
+            if rating > album.cover_rating {
+                let cover_url = Some(find_url(&path, &base, &files_url)?);
+                album.cover_url = cover_url.clone();
+                album.cover_rating = rating;
+
+                // update all songs for the current album
+                for song in album.songs.iter() {
+                    if let Some(song) = song {
+                        song.write().await.cover_url = cover_url.clone();
+                    }
+                }
+            }
+        } else {
+            warn!(
+                "Attempted to insert a cover for a nonexistent album: {}",
+                album_unique_name.as_ref()
+            );
+        }
+
+        Ok(())
+    }
+
+    fn rate_cover<P: AsRef<Path>>(path: &P) -> Result<u32> {
+        let file_name = path
+            .as_ref()
+            .file_name()
+            .chain_err(indexing_error!(path, "rating cover"))?;
+        let name = file_name.to_string_lossy();
+        let mut value = 0u32;
+
+        if name.contains("cover") {
+            value += 100;
+        }
+
+        if name.contains("small") {
+            value += 20;
+        }
+
+        Ok(value)
+    }
 }
 
 fn sanitize(s: &str) -> String {
@@ -453,6 +573,33 @@ fn sanitize(s: &str) -> String {
         "-",
     )
     .to_ascii_lowercase()
+}
+
+fn find_url<P1: AsRef<Path>, P2: AsRef<Path>, S: AsRef<str>>(
+    path: &P1,
+    base: P2,
+    files_url: &S,
+) -> Result<String> {
+    let stripped = path
+        .as_ref()
+        .strip_prefix(base)
+        .chain_err(indexing_error!(path, "formatting url"))?;
+    Ok(format!(
+        "{}/{}",
+        files_url.as_ref(),
+        utf8_percent_encode(&stripped.to_slash_lossy(), &PATH_SET)
+    ))
+}
+
+fn paths_eq(p1: &Option<PathBuf>, p2: &Option<&Path>) -> bool {
+    if p1.is_none() {
+        return p2.is_none();
+    }
+    if p2.is_none() {
+        return false;
+    }
+
+    p1.as_ref().unwrap() == p2.unwrap()
 }
 
 pub fn apply_services() -> Scope {

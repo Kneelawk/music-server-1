@@ -6,8 +6,8 @@ use std::{borrow::Cow, fmt::Debug};
 
 error_chain! {
     errors {
-        IndexingError(path: Option<String>) {
-            display("Indexing Error at {:?}", path)
+        IndexingError(path: Option<String>, desc: &'static str) {
+            display("Indexing Error at {:?} while {}", path, desc)
         }
         ConfigLoadError(msg: Cow<'static, str>) {
             display("Error loading config: {}", msg)
