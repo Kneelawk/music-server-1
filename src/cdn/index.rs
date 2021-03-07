@@ -32,8 +32,7 @@ pub struct Artist {
 pub struct Album {
     name: String,
     unique_name: String,
-    artists: Vec<String>,
-    artist_unique_names: Vec<String>,
+    artists: Vec<ArtistRef>,
     songs: Vec<Option<Arc<RwLock<Song>>>>,
     songs_by_name: HashMap<String, Arc<RwLock<Song>>>,
     cover_url: Option<String>,
@@ -42,14 +41,30 @@ pub struct Album {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Song {
-    title: String,
+    name: String,
     unique_name: String,
-    album: String,
-    album_unique_name: String,
-    artists: Vec<String>,
-    artist_unique_names: Vec<String>,
+    album: AlbumRef,
+    artists: Vec<ArtistRef>,
     track: Option<u32>,
     url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtistRef {
+    name: String,
+    unique_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AlbumRef {
+    name: String,
+    unique_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SongRef {
+    name: String,
+    unique_name: String,
 }
 
 lazy_static::lazy_static! {
@@ -121,14 +136,18 @@ impl Song {
 
         Ok(Song {
             unique_name: sanitize(&title),
-            title,
-            album: album.unwrap_or("Unknown".to_string()),
-            album_unique_name: "".to_string(),
+            name: title,
+            album: AlbumRef {
+                name: album.unwrap_or("Unknown".to_string()),
+                unique_name: "".to_string(),
+            },
             artists: ARTIST_SPLIT_PATTERN
                 .split(&artist.unwrap_or("Unknown".to_string()))
-                .map(|s| s.to_string())
+                .map(|s| ArtistRef {
+                    name: s.to_string(),
+                    unique_name: "".to_string(),
+                })
                 .collect(),
-            artist_unique_names: Default::default(),
             track,
             url,
         })
@@ -257,7 +276,15 @@ impl Index {
     }
 
     async fn insert_song(&mut self, mut song: Song) {
-        let album = self.get_or_insert_album(&song.album, &song.artists).await;
+        for artist in song.artists.iter_mut() {
+            artist.unique_name = self.get_or_insert_artist(&artist.name).await;
+        }
+
+        let album = self
+            .get_or_insert_album(&song.album.name, &song.artists)
+            .await;
+
+        song.album.unique_name = album.read().await.unique_name.clone();
 
         if let Some(track) = song.track {
             album.write().await.tracked = true;
@@ -266,28 +293,12 @@ impl Index {
                 album.write().await.songs.resize(track as usize, None);
             }
 
-            song.album_unique_name = album.read().await.unique_name.clone();
-
-            let mut artist_unique_names = vec![];
-            for artist in song.artists.iter() {
-                artist_unique_names.push(self.get_or_insert_artist(artist).await);
-            }
-            song.artist_unique_names = artist_unique_names;
-
             let song_name = song.unique_name.clone();
             let song = Arc::new(RwLock::new(song));
 
             album.write().await.songs[(track - 1) as usize] = Some(song.clone());
             album.write().await.songs_by_name.insert(song_name, song);
         } else {
-            song.album_unique_name = album.read().await.unique_name.clone();
-
-            let mut artist_unique_names = vec![];
-            for artist in song.artists.iter() {
-                artist_unique_names.push(self.get_or_insert_artist(artist).await);
-            }
-            song.artist_unique_names = artist_unique_names;
-
             let song_name = song.unique_name.clone();
             let song = Arc::new(RwLock::new(song));
 
@@ -296,7 +307,11 @@ impl Index {
         }
     }
 
-    async fn get_or_insert_album(&mut self, name: &str, artists: &[String]) -> Arc<RwLock<Album>> {
+    async fn get_or_insert_album(
+        &mut self,
+        name: &str,
+        artists: &[ArtistRef],
+    ) -> Arc<RwLock<Album>> {
         let mut unique_name = sanitize(name);
 
         if self.albums.contains_key(&unique_name) {
@@ -306,17 +321,17 @@ impl Index {
                 .expect("BUG: Missing found artist")
                 .clone();
             if found.read().await.name == name {
-                for artist_name in artists {
-                    if !found.read().await.artists.contains(artist_name) {
-                        let artist_unique_name = self.get_or_insert_artist(artist_name).await;
-
-                        found.write().await.artists.push(artist_name.clone());
-                        found
-                            .write()
-                            .await
-                            .artist_unique_names
-                            .push(artist_unique_name.clone());
-                        self.artists[&artist_unique_name]
+                for artist_ref in artists {
+                    if found
+                        .read()
+                        .await
+                        .artists
+                        .iter()
+                        .find(|a| a.unique_name == artist_ref.unique_name)
+                        .is_none()
+                    {
+                        found.write().await.artists.push(artist_ref.clone());
+                        self.artists[&artist_ref.unique_name]
                             .write()
                             .await
                             .albums
@@ -336,17 +351,17 @@ impl Index {
                     .expect("BUG: Missing found artist")
                     .clone();
                 if found.read().await.name == name {
-                    for artist_name in artists {
-                        if !found.read().await.artists.contains(artist_name) {
-                            let artist_unique_name = self.get_or_insert_artist(artist_name).await;
-
-                            found.write().await.artists.push(artist_name.clone());
-                            found
-                                .write()
-                                .await
-                                .artist_unique_names
-                                .push(artist_unique_name.clone());
-                            self.artists[&artist_unique_name]
+                    for artist_ref in artists {
+                        if found
+                            .read()
+                            .await
+                            .artists
+                            .iter()
+                            .find(|a| a.unique_name == artist_ref.unique_name)
+                            .is_none()
+                        {
+                            found.write().await.artists.push(artist_ref.clone());
+                            self.artists[&artist_ref.unique_name]
                                 .write()
                                 .await
                                 .albums
@@ -363,16 +378,10 @@ impl Index {
             unique_name = found_name;
         }
 
-        let mut artist_unique_names = vec![];
-        for artist in artists.iter() {
-            artist_unique_names.push(self.get_or_insert_artist(artist).await);
-        }
-
         let album = Arc::new(RwLock::new(Album {
             name: name.to_string(),
             unique_name: unique_name.clone(),
             artists: artists.to_vec(),
-            artist_unique_names: artist_unique_names.clone(),
             songs: Default::default(),
             songs_by_name: Default::default(),
             cover_url: None,
@@ -380,9 +389,9 @@ impl Index {
         }));
 
         self.albums.insert(unique_name.clone(), album.clone());
-        for artist_unique_name in artist_unique_names {
+        for artist_ref in artists {
             self.artists
-                .get_mut(&artist_unique_name)
+                .get_mut(&artist_ref.unique_name)
                 .expect("BUG: Missing newly inserted artist")
                 .write()
                 .await
@@ -530,9 +539,8 @@ async fn get_song(
 struct AlbumJson {
     name: String,
     unique_name: String,
-    artists: Vec<String>,
-    artist_unique_names: Vec<String>,
-    songs: Vec<Option<String>>,
+    artists: Vec<ArtistRef>,
+    songs: Vec<Option<SongRef>>,
     cover_url: Option<String>,
     tracked: bool,
 }
@@ -543,11 +551,14 @@ impl AlbumJson {
             name: album.name.clone(),
             unique_name: album.unique_name.clone(),
             artists: album.artists.clone(),
-            artist_unique_names: album.artist_unique_names.clone(),
             songs: stream::iter(&album.songs)
                 .then(|song| async move {
                     if let Some(song) = song {
-                        Some(song.read().await.unique_name.clone())
+                        let song = song.read().await;
+                        Some(SongRef {
+                            name: song.name.clone(),
+                            unique_name: song.unique_name.clone(),
+                        })
                     } else {
                         None
                     }
@@ -564,16 +575,26 @@ impl AlbumJson {
 struct ArtistJson {
     name: String,
     unique_name: String,
-    albums: Vec<String>,
+    albums: Vec<AlbumRef>,
     cover_url: Option<String>,
 }
 
 impl ArtistJson {
     async fn from_artist(artist: &Artist) -> ArtistJson {
+        let mut albums = vec![];
+
+        for album in artist.albums.values() {
+            let album = album.read().await;
+            albums.push(AlbumRef {
+                name: album.name.clone(),
+                unique_name: album.unique_name.clone(),
+            })
+        }
+
         ArtistJson {
             name: artist.name.clone(),
             unique_name: artist.unique_name.clone(),
-            albums: artist.albums.keys().cloned().collect(),
+            albums,
             cover_url: artist.cover_url.clone(),
         }
     }

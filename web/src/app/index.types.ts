@@ -8,9 +8,20 @@ export interface ResponseResult<T> {
 export interface AlbumJson {
   name: string;
   unique_name: string;
-  artists: string[],
-  artist_unique_names: string[];
-  songs: Array<string | null>;
+  artists: ArtistRef[];
+  songs: Array<SongRef | null>;
   cover_url: string | null;
   tracked: boolean;
+}
+
+/// Describes a reference to an artist.
+export interface ArtistRef {
+  name: string;
+  unique_name: string;
+}
+
+/// Describes a reference to a song.
+export interface SongRef {
+  name: string;
+  unique_name: string;
 }
