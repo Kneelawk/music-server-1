@@ -33,13 +33,13 @@
       <span>Music Server 1</span>
     </mat-toolbar>
     <div class="navigation-content">
-      <mat-grid-list cols="4" rowHeight="400px" gutterSize="20px">
+      <mat-grid-list cols="4" rowHeight="500px" gutterSize="20px">
         <mat-grid-tile *ngFor="let album of albums$ | async" class="album-tile">
           <mat-card class="album-card">
+            <img mat-card-image *ngIf="album.cover_url != null" [src]="url(album.cover_url)" alt="Album Cover">
             <mat-card-header>
               <mat-card-title>{{album.name}}</mat-card-title>
               <mat-card-subtitle>{{getAlbumArtists(album)}}</mat-card-subtitle>
-              <img *ngIf="album.cover_url != null" [src]="url(album.cover_url)" alt="Album Cover" width="200px" height="200px">
             </mat-card-header>
           </mat-card>
         </mat-grid-tile>

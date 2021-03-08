@@ -29,7 +29,11 @@
 
 .album-card
   width 350px
-  height 350px
+  height 450px
+
+.album-card .mat-card-image
+  object-fit cover
+  height calc(100% - 100px + 32px)
 
 app-player-bar
   position fixed
