@@ -32,15 +32,19 @@
       </button>
       <span>Music Server 1</span>
     </mat-toolbar>
-    <mat-grid-list cols="4" rowHeight="100px">
-      <mat-grid-tile *ngFor="let album of albums$ | async">
-        <mat-card>
-          <mat-card-header>
-            <mat-card-title>{{album.name}}</mat-card-title>
-            <mat-card-subtitle>{{album.artists.slice(0, 2).join(", ")}}<span *ngIf="album.artists.length > 2">, ...</span></mat-card-subtitle>
-          </mat-card-header>
-        </mat-card>
-      </mat-grid-tile>
-    </mat-grid-list>
+    <div class="navigation-content">
+      <mat-grid-list cols="4" rowHeight="400px" gutterSize="20px">
+        <mat-grid-tile *ngFor="let album of albums$ | async" class="album-tile">
+          <mat-card class="album-card">
+            <mat-card-header>
+              <mat-card-title>{{album.name}}</mat-card-title>
+              <mat-card-subtitle>{{getAlbumArtists(album)}}</mat-card-subtitle>
+              <img *ngIf="album.cover_url != null" [src]="url(album.cover_url)" alt="Album Cover" width="200px" height="200px">
+            </mat-card-header>
+          </mat-card>
+        </mat-grid-tile>
+      </mat-grid-list>
+    </div>
+    <app-player-bar></app-player-bar>
   </mat-sidenav-content>
 </mat-sidenav-container>

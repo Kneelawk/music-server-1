@@ -8,7 +8,7 @@ import { AlbumJson } from "../index.types";
 @Component({
   selector: 'app-navigation',
   templateUrl: './navigation.component.html',
-  styleUrls: ['./navigation.component.css'],
+  styleUrls: ['./navigation.component.styl'],
   encapsulation: ViewEncapsulation.None
 })
 export class NavigationComponent implements OnInit {
@@ -29,4 +29,15 @@ export class NavigationComponent implements OnInit {
     console.log("Albums: " + this.albums$);
   }
 
+  url(url: string): string {
+    return this.index.url(url)
+  }
+
+  getAlbumArtists(album: AlbumJson): string {
+    let artists = album.artists.slice(0, 2).map(artist => artist.name).join(", ")
+    if (album.artists.length > 2) {
+      artists += ", ..."
+    }
+    return artists
+  }
 }

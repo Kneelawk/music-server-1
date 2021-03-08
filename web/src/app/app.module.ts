@@ -14,11 +14,13 @@ import { NavigationComponent } from './navigation/navigation.component';
 import { HttpClientModule } from "@angular/common/http";
 import { MatGridListModule } from "@angular/material/grid-list";
 import { MatCardModule } from "@angular/material/card";
+import { PlayerBarComponent } from './player-bar/player-bar.component';
 
 @NgModule({
   declarations: [
     AppComponent,
-    NavigationComponent
+    NavigationComponent,
+    PlayerBarComponent
   ],
   imports: [
     BrowserModule,

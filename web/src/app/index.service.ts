@@ -16,7 +16,7 @@ export class IndexService {
     return this.client.get<ResponseResult<AlbumJson[]>>(this.url(this.albumsUrl));
   }
 
-  private url(path: string) {
+  url(path: string) {
     return this.baseUrl + path
   }
 }
