@@ -20,6 +20,7 @@ ffmpeg4 = "^0.4.0"
 ffmpeg4-sys = "4.2.2"
 futures = "^0.3.13"
 futures-util = "^0.3.13"
+image = "^0.23.14"
 lazy_static = "^1.4.0"
 log = "^0.4.14"
 path-slash = "^0.1.4"
@@ -38,7 +39,7 @@ version = "^1.0.0"
 
 [dependencies.tokio]
 version = "^0.2.25"
-features = ["sync"]
+features = ["blocking", "sync"]
 
 [build-dependencies]
 actix-web-static-files = "^3.0.5"

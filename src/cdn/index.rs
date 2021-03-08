@@ -3,13 +3,17 @@ use crate::{
     util::w_ok,
 };
 use actix_web::{dev::HttpResponseBuilder, http::StatusCode, web, HttpResponse, Scope};
-use ffmpeg4::{format, DictionaryRef};
+use ffmpeg4::{
+    format, frame, media, software, DictionaryRef,
+};
 use futures::{stream, StreamExt};
+use image::ColorType;
 use path_slash::PathExt;
 use percent_encoding::{utf8_percent_encode, AsciiSet, NON_ALPHANUMERIC};
 use regex::{Regex, RegexSet};
 use serde::{Deserialize, Serialize};
 use std::{
+    borrow::Cow,
     collections::HashMap,
     path::{Path, PathBuf},
     sync::Arc,
@@ -19,7 +23,10 @@ use tokio::sync::RwLock;
 
 macro_rules! indexing_error {
     ($path:expr, $desc:expr) => {
-        || ErrorKind::IndexingError(Some($path.as_ref().to_string_lossy().to_string()), $desc)
+        || {
+            let path: &Path = $path.as_ref();
+            ErrorKind::IndexingError(Some(path.to_string_lossy().to_string()), $desc)
+        }
     };
 }
 
@@ -49,9 +56,10 @@ pub struct Album {
     cover_url: Option<String>,
     cover_rating: u32,
     tracked: bool,
+    path: PathBuf,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct Song {
     name: String,
     unique_name: String,
@@ -60,6 +68,7 @@ pub struct Song {
     track: Option<u32>,
     cover_url: Option<String>,
     url: String,
+    path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -157,6 +166,7 @@ impl Song {
             track,
             cover_url: None,
             url,
+            path: path.as_ref().to_path_buf(),
         })
     }
 
@@ -197,7 +207,7 @@ impl Index {
         cover_exclude: &RegexSet,
     ) -> Result<Index> {
         info!("Indexing {}", base_dir.as_ref().to_string_lossy());
-        let start_time = SystemTime::now();
+        let index_start_time = SystemTime::now();
 
         let mut index = Index {
             artists: Default::default(),
@@ -230,23 +240,23 @@ impl Index {
 
                         let song = Song::parse(&path, &base_dir, &base_url).await?;
                         debug!("Loaded metadata: {:?}", &song);
-                        let song = index.insert_song(song).await;
+                        let song = index.insert_song(song).await?;
                         song_count += 1;
 
+                        let album_unique_name = song.read().await.album.unique_name.clone();
+
                         previous_song_parent = path.parent().map(|p| p.to_path_buf());
-                        previous_album = Some(song.read().await.album.unique_name.clone());
+                        previous_album = Some(album_unique_name.clone());
 
                         // if we found the cover first, then this vec should be populated
                         for cover in found_covers.drain(..) {
-                            let album = song.read().await.album.unique_name.clone();
                             trace!(
                                 "Inserting cover into new album: {}: {}",
-                                &album,
+                                &album_unique_name,
                                 cover.to_string_lossy()
                             );
-                            index
-                                .insert_cover(&cover, &base_dir, &base_url, &album)
-                                .await?;
+                            let mut album = index.albums[&album_unique_name].write().await;
+                            Index::insert_cover(&mut album, &cover, &base_dir, &base_url).await?;
                         }
                     } else if cover_include.is_match(&path_str)
                         && !cover_exclude.is_match(&path_str)
@@ -259,9 +269,8 @@ impl Index {
                                 "BUG: previous_song_parent was Some but previous_album was None",
                             );
                             trace!("Editing existing album: {}: {}", previous_album, &path_str);
-                            index
-                                .insert_cover(&path, &base_dir, &base_url, previous_album)
-                                .await?;
+                            let mut album = index.albums[previous_album].write().await;
+                            Index::insert_cover(&mut album, &path, &base_dir, &base_url).await?;
                         } else {
                             // we haven't found any songs for this album yet
                             trace!("Found cover: {} for new album.", &path_str);
@@ -301,7 +310,7 @@ impl Index {
         info!(
             "Indexed {} songs in {:?}",
             song_count,
-            SystemTime::now().duration_since(start_time).unwrap()
+            SystemTime::now().duration_since(index_start_time).unwrap()
         );
 
         info!("{} Albums loaded.", index.albums.len());
@@ -324,16 +333,48 @@ impl Index {
                 .await
         );
 
+        info!("Generating album covers...");
+        let cover_gen_start_time = SystemTime::now();
+        let mut covers_generated = 0u32;
+        for album in index.album_list.iter() {
+            if album.read().await.cover_url.is_none() {
+                let cover_path = {
+                    // we don't want to be holding this lock when we insert the cover
+                    let album = album.read().await;
+                    Index::gen_cover(&album).await?
+                };
+                if let Some(cover_path) = cover_path {
+                    let mut album = album.write().await;
+                    Index::insert_cover(&mut album, &cover_path, &base_dir, &base_url).await?;
+                    covers_generated += 1;
+                }
+            }
+        }
+        info!(
+            "Generated {} covers in {:?}",
+            covers_generated,
+            SystemTime::now()
+                .duration_since(cover_gen_start_time)
+                .unwrap()
+        );
+
         Ok(index)
     }
 
-    async fn insert_song(&mut self, mut song: Song) -> Arc<RwLock<Song>> {
+    async fn insert_song(&mut self, mut song: Song) -> Result<Arc<RwLock<Song>>> {
         for artist in song.artists.iter_mut() {
             artist.unique_name = self.get_or_insert_artist(&artist.name).await;
         }
 
         let album = self
-            .get_or_insert_album(&song.album.name, &song.artists)
+            .get_or_insert_album(
+                &song.album.name,
+                &song.artists,
+                song.path
+                    .parent()
+                    .chain_err(indexing_error!(song.path, "getting song path"))?
+                    .to_path_buf(),
+            )
             .await;
 
         song.album.unique_name = album.read().await.unique_name.clone();
@@ -359,7 +400,7 @@ impl Index {
                 .songs_by_name
                 .insert(song_name, song.clone());
 
-            song
+            Ok(song)
         } else {
             let song_name = song.unique_name.clone();
             let song = Arc::new(RwLock::new(song));
@@ -371,7 +412,7 @@ impl Index {
                 .songs_by_name
                 .insert(song_name, song.clone());
 
-            song
+            Ok(song)
         }
     }
 
@@ -379,6 +420,7 @@ impl Index {
         &mut self,
         name: &str,
         artists: &[ArtistRef],
+        path: PathBuf,
     ) -> Arc<RwLock<Album>> {
         let mut unique_name = sanitize(name);
 
@@ -455,6 +497,7 @@ impl Index {
             cover_url: None,
             cover_rating: 0,
             tracked: false,
+            path,
         }));
 
         self.albums.insert(unique_name.clone(), album.clone());
@@ -515,33 +558,24 @@ impl Index {
         unique_name
     }
 
-    async fn insert_cover<P1: AsRef<Path>, P2: AsRef<Path>, S1: AsRef<str>, S2: AsRef<str>>(
-        &mut self,
+    async fn insert_cover<P1: AsRef<Path>, P2: AsRef<Path>, S1: AsRef<str>>(
+        album: &mut Album,
         path: &P1,
         base: &P2,
         files_url: &S1,
-        album_unique_name: &S2,
     ) -> Result<()> {
-        if self.albums.contains_key(album_unique_name.as_ref()) {
-            let mut album = self.albums[album_unique_name.as_ref()].write().await;
-            let rating = Index::rate_cover(&path)?;
-            if rating > album.cover_rating {
-                let cover_url = Some(find_url(&path, &base, &files_url)?);
-                album.cover_url = cover_url.clone();
-                album.cover_rating = rating;
+        let rating = Index::rate_cover(&path)?;
+        if rating > album.cover_rating {
+            let cover_url = Some(find_url(&path, &base, &files_url)?);
+            album.cover_url = cover_url.clone();
+            album.cover_rating = rating;
 
-                // update all songs for the current album
-                for song in album.songs.iter() {
-                    if let Some(song) = song {
-                        song.write().await.cover_url = cover_url.clone();
-                    }
+            // update all songs for the current album
+            for song in album.songs.iter() {
+                if let Some(song) = song {
+                    song.write().await.cover_url = cover_url.clone();
                 }
             }
-        } else {
-            warn!(
-                "Attempted to insert a cover for a nonexistent album: {}",
-                album_unique_name.as_ref()
-            );
         }
 
         Ok(())
@@ -553,7 +587,7 @@ impl Index {
             .file_name()
             .chain_err(indexing_error!(path, "rating cover"))?;
         let name = file_name.to_string_lossy();
-        let mut value = 0u32;
+        let mut value = 1u32;
 
         if name.contains("cover") {
             value += 100;
@@ -564,6 +598,168 @@ impl Index {
         }
 
         Ok(value)
+    }
+
+    async fn gen_cover(album: &Album) -> Result<Option<PathBuf>> {
+        trace!("Generating cover for {}", album.unique_name);
+        for song in album.songs.iter() {
+            if let Some(song) = song {
+                let song_path = song.read().await.path.clone();
+                let song_path_2 = song_path.clone();
+                trace!("Scanning song: {}", &song_path.to_string_lossy());
+
+                let cover: Result<_> = tokio::task::spawn_blocking(move || {
+                    let frame = Index::read_frame(&song_path)?;
+                    if let Some(frame) = frame {
+                        let path = Index::make_cover_path(&song_path)?;
+                        let data = Index::fit_frame(&frame);
+
+                        image::save_buffer(
+                            &path,
+                            &data,
+                            frame.width(),
+                            frame.height(),
+                            ColorType::Rgba8,
+                        )
+                        .chain_err(indexing_error!(&song_path, "Writing cover image to file"))?;
+
+                        Ok(Some(path))
+                    } else {
+                        Ok(None)
+                    }
+                })
+                .await
+                .chain_err(indexing_error!(
+                    &song_path_2,
+                    "Running cover image extraction off-thread"
+                ))?;
+                let cover = cover?;
+
+                if cover.is_some() {
+                    return Ok(cover);
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn read_frame(song_path: &Path) -> Result<Option<frame::Video>> {
+        let mut input = format::input(&song_path)
+            .chain_err(indexing_error!(song_path, "Opening song file for cover"))?;
+
+        // open the song stream
+        let stream = match input.streams().best(media::Type::Video) {
+            None => {
+                trace!(
+                    "{} does not have a video stream",
+                    song_path.to_string_lossy()
+                );
+                return Ok(None);
+            }
+            Some(it) => it,
+        };
+
+        // create the decoder
+        let mut decoder = stream.codec().decoder().video().chain_err(indexing_error!(
+            song_path,
+            "Finding decoder for song file cover"
+        ))?;
+        decoder
+            .set_parameters(stream.parameters())
+            .chain_err(indexing_error!(
+                song_path,
+                "Setting parameters for song file cover decoder"
+            ))?;
+        let stream_index = stream.index();
+
+        // create the converter to convert the cover to RGBA color space
+        let mut converter_2 = software::converter(
+            (decoder.width(), decoder.height()),
+            decoder.format(),
+            format::Pixel::RGBA,
+        )
+        .chain_err(indexing_error!(
+            song_path,
+            "Creating cover image converter for song file"
+        ))?;
+
+        let mut decoded = frame::Video::empty();
+        let mut converted = frame::Video::empty();
+
+        // find the cover packet
+        for (stream, mut packet) in input.packets() {
+            if stream.index() == stream_index {
+                packet.rescale_ts(stream.time_base(), decoder.time_base());
+
+                // decode the cover
+                if let Ok(true) = decoder.decode(&packet, &mut decoded) {
+                    let timestamp = decoded.timestamp();
+                    decoded.set_pts(timestamp);
+
+                    trace!("Frame dimensions: {}x{}", decoded.width(), decoded.height());
+                    trace!("Frame colorspace: {:?}", decoded.color_space());
+                    trace!("Frame pixel format: {:?}", decoded.format());
+
+                    // convert the cover to RGBA color space
+                    converter_2
+                        .run(&decoded, &mut converted)
+                        .chain_err(indexing_error!(song_path, "Converting song cover"))?;
+
+                    converted.set_pts(decoded.pts());
+
+                    return Ok(Some(converted));
+                }
+            }
+        }
+
+        Ok(None)
+    }
+
+    fn make_cover_path(song_path: &Path) -> Result<PathBuf> {
+        let filename = format!(
+            "{}-ms1-cover-small-generated.jpg",
+            song_path
+                .file_name()
+                .expect(
+                    "BUG: Encountered song with no file
+                            name"
+                )
+                .to_string_lossy()
+        );
+        trace!("Writing cover to: {}", &filename);
+        Ok(song_path
+            .parent()
+            .chain_err(indexing_error!(
+                song_path,
+                "Getting song parent directory
+                            for cover generation"
+            ))?
+            .join(filename))
+    }
+
+    fn fit_frame(frame: &frame::Video) -> Cow<[u8]> {
+        let width = frame.width() as usize;
+        let height = frame.height() as usize;
+        let extra = frame.data(0).len() - width * height * 4;
+        if extra == 0 {
+            Cow::Borrowed(frame.data(0))
+        } else {
+            let offset = extra / height / 4;
+            warn!(
+                "Encountered cover image with {} pixels of garbage data",
+                offset
+            );
+            let data = frame.data(0);
+            let mut new_data = vec![];
+            new_data.reserve(width * height * 4);
+            for y in 0..(frame.height() as usize) {
+                new_data.extend_from_slice(
+                    &data[(y * (width + offset) * 4)..(y * (width + offset) * 4 + width * 4)],
+                )
+            }
+            Cow::Owned(new_data)
+        }
     }
 }
 
@@ -673,12 +869,39 @@ async fn get_song(
     if let Some(album) = index.albums.get(&album_name) {
         let album = album.read().await;
         if let Some(song) = album.songs_by_name.get(&song_name) {
-            Ok(HttpResponseBuilder::new(StatusCode::OK).json(w_ok(song.read().await.clone())))
+            let song = song.read().await;
+
+            Ok(HttpResponseBuilder::new(StatusCode::OK).json(w_ok(SongJson::from_song(&song))))
         } else {
             bail!(ErrorKind::NoSuchResource)
         }
     } else {
         bail!(ErrorKind::NoSuchResource);
+    }
+}
+
+#[derive(Serialize)]
+struct SongJson {
+    name: String,
+    unique_name: String,
+    album: AlbumRef,
+    artists: Vec<ArtistRef>,
+    track: Option<u32>,
+    cover_url: Option<String>,
+    url: String,
+}
+
+impl SongJson {
+    fn from_song(song: &Song) -> SongJson {
+        SongJson {
+            name: song.name.clone(),
+            unique_name: song.unique_name.clone(),
+            album: song.album.clone(),
+            artists: song.artists.clone(),
+            track: song.track.clone(),
+            cover_url: song.cover_url.clone(),
+            url: song.url.clone(),
+        }
     }
 }
 
