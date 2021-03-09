@@ -95,54 +95,53 @@ static ref PATH_SET: AsciiSet = NON_ALPHANUMERIC.remove(b'/').remove(b'-').remov
 }
 
 impl Song {
-    async fn parse<P1: AsRef<Path>, P2: AsRef<Path>, S: AsRef<str>>(
-        path: &P1,
-        base: &P2,
-        files_url: &S,
-    ) -> Result<Song> {
-        let url = find_url(&path, base, files_url)?;
+    async fn parse(path: &Path, base: &Path, files_url: &str) -> Result<Song> {
+        let url = find_url(&path, &base, &files_url)?;
+        let path_moved = path.to_path_buf();
 
-        // TODO: make this async... probably with blocking()
-        let context =
-            format::input(&path).chain_err(indexing_error!(path, "probing media file"))?;
+        let res: Result<_> = tokio::task::spawn_blocking(move || {
+            let context = format::input(&path_moved)
+                .chain_err(indexing_error!(path_moved, "probing media file"))?;
 
-        trace!("Format Metadata:");
-        let metadata = context.metadata();
-        for (key, value) in metadata.iter() {
-            trace!("  '{}': '{}'", key, value);
-        }
-        let mut title = Song::find_title(&metadata);
-        let mut album = Song::find_album(&metadata);
-        let mut artist = Song::find_artist(&metadata);
-        let mut track = Song::find_track(&metadata);
-
-        for (index, stream) in context.streams().enumerate() {
-            if !(title.is_none() || album.is_none() || artist.is_none() || track.is_none()) {
-                break;
-            }
-
-            trace!("Stream {} Metadata:", index);
-            let metadata = stream.metadata();
+            trace!("Format Metadata:");
+            let metadata = context.metadata();
             for (key, value) in metadata.iter() {
                 trace!("  '{}': '{}'", key, value);
             }
-            title = title.or_else(|| Song::find_title(&metadata));
-            album = album.or_else(|| Song::find_album(&metadata));
-            artist = artist.or_else(|| Song::find_artist(&metadata));
-            track = track.or_else(|| Song::find_track(&metadata));
-        }
+            let mut title = Song::find_title(&metadata);
+            let mut album = Song::find_album(&metadata);
+            let mut artist = Song::find_artist(&metadata);
+            let mut track = Song::find_track(&metadata);
+
+            for (index, stream) in context.streams().enumerate() {
+                if !(title.is_none() || album.is_none() || artist.is_none() || track.is_none()) {
+                    break;
+                }
+
+                trace!("Stream {} Metadata:", index);
+                let metadata = stream.metadata();
+                for (key, value) in metadata.iter() {
+                    trace!("  '{}': '{}'", key, value);
+                }
+                title = title.or_else(|| Song::find_title(&metadata));
+                album = album.or_else(|| Song::find_album(&metadata));
+                artist = artist.or_else(|| Song::find_artist(&metadata));
+                track = track.or_else(|| Song::find_track(&metadata));
+            }
+
+            Ok((title, album, artist, track))
+        })
+        .await
+        .chain_err(indexing_error!(path, "running ffmpeg to probe media file"))?;
+        let (mut title, album, artist, track) = res?;
 
         if title.is_none() {
-            title = path
-                .as_ref()
-                .file_name()
-                .map(|n| n.to_string_lossy())
-                .and_then(|n| {
-                    FILENAME_STRIP_SUFFIX
-                        .captures(&n)
-                        .and_then(|c| c.name("name"))
-                        .map(|m| m.as_str().to_string())
-                })
+            title = path.file_name().map(|n| n.to_string_lossy()).and_then(|n| {
+                FILENAME_STRIP_SUFFIX
+                    .captures(&n)
+                    .and_then(|c| c.name("name"))
+                    .map(|m| m.as_str().to_string())
+            })
         }
 
         let title = title.unwrap_or("Unknown".to_string());
@@ -164,7 +163,7 @@ impl Song {
             track,
             cover_url: None,
             url,
-            path: path.as_ref().to_path_buf(),
+            path: path.to_path_buf(),
         })
     }
 
@@ -236,7 +235,7 @@ impl Index {
                     if media_include.is_match(&path_str) && !media_exclude.is_match(&path_str) {
                         trace!("Found media file.");
 
-                        let song = Song::parse(&path, &base_dir, &base_url).await?;
+                        let song = Song::parse(&path, base_dir.as_ref(), base_url.as_ref()).await?;
                         debug!("Loaded metadata: {:?}", &song);
                         let song = index.insert_song(song).await?;
                         song_count += 1;
@@ -254,7 +253,13 @@ impl Index {
                                 cover.to_string_lossy()
                             );
                             let mut album = index.albums[&album_unique_name].write().await;
-                            Index::insert_cover(&mut album, &cover, &base_dir, &base_url).await?;
+                            Index::insert_cover(
+                                &mut album,
+                                &cover,
+                                base_dir.as_ref(),
+                                base_url.as_ref(),
+                            )
+                            .await?;
                         }
                     } else if cover_include.is_match(&path_str)
                         && !cover_exclude.is_match(&path_str)
@@ -268,7 +273,13 @@ impl Index {
                             );
                             trace!("Editing existing album: {}: {}", previous_album, &path_str);
                             let mut album = index.albums[previous_album].write().await;
-                            Index::insert_cover(&mut album, &path, &base_dir, &base_url).await?;
+                            Index::insert_cover(
+                                &mut album,
+                                &path,
+                                base_dir.as_ref(),
+                                base_url.as_ref(),
+                            )
+                            .await?;
                         } else {
                             // we haven't found any songs for this album yet
                             trace!("Found cover: {} for new album.", &path_str);
@@ -343,7 +354,13 @@ impl Index {
                 };
                 if let Some(cover_path) = cover_path {
                     let mut album = album.write().await;
-                    Index::insert_cover(&mut album, &cover_path, &base_dir, &base_url).await?;
+                    Index::insert_cover(
+                        &mut album,
+                        &cover_path,
+                        base_dir.as_ref(),
+                        base_url.as_ref(),
+                    )
+                    .await?;
                     covers_generated += 1;
                 }
             }
@@ -556,15 +573,15 @@ impl Index {
         unique_name
     }
 
-    async fn insert_cover<P1: AsRef<Path>, P2: AsRef<Path>, S1: AsRef<str>>(
+    async fn insert_cover(
         album: &mut Album,
-        path: &P1,
-        base: &P2,
-        files_url: &S1,
+        path: &Path,
+        base: &Path,
+        files_url: &str,
     ) -> Result<()> {
         let rating = Index::rate_cover(&path)?;
         if rating > album.cover_rating {
-            let cover_url = Some(find_url(&path, &base, &files_url)?);
+            let cover_url = Some(find_url(path, base, files_url)?);
             album.cover_url = cover_url.clone();
             album.cover_rating = rating;
 
@@ -579,9 +596,8 @@ impl Index {
         Ok(())
     }
 
-    fn rate_cover<P: AsRef<Path>>(path: &P) -> Result<u32> {
+    fn rate_cover(path: &Path) -> Result<u32> {
         let file_name = path
-            .as_ref()
             .file_name()
             .chain_err(indexing_error!(path, "rating cover"))?;
         let name = file_name.to_string_lossy();
@@ -769,18 +785,13 @@ fn sanitize(s: &str) -> String {
     .to_ascii_lowercase()
 }
 
-fn find_url<P1: AsRef<Path>, P2: AsRef<Path>, S: AsRef<str>>(
-    path: &P1,
-    base: P2,
-    files_url: &S,
-) -> Result<String> {
+fn find_url(path: &Path, base: &Path, files_url: &str) -> Result<String> {
     let stripped = path
-        .as_ref()
         .strip_prefix(base)
         .chain_err(indexing_error!(path, "formatting url"))?;
     Ok(format!(
         "{}/{}",
-        files_url.as_ref(),
+        files_url,
         utf8_percent_encode(&stripped.to_slash_lossy(), &PATH_SET)
     ))
 }
