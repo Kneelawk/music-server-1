@@ -219,7 +219,19 @@ impl Index {
         let mut previous_album = None;
         let mut found_covers: Vec<PathBuf> = vec![];
 
-        for dir in walkdir::WalkDir::new(&base_dir).follow_links(true) {
+        debug!("Traversing music directory...");
+        let base_dir_moved = base_dir.as_ref().to_path_buf();
+        let walked: Vec<_> = tokio::task::spawn_blocking(move || {
+            walkdir::WalkDir::new(&base_dir_moved)
+                .follow_links(true)
+                .into_iter()
+                .collect()
+        })
+        .await
+        .chain_err(|| ErrorKind::IndexingError(None, "doing initial music directory traversal"))?;
+
+        debug!("Browsing results...");
+        for dir in walked {
             match dir {
                 Ok(dir) => {
                     let path = dir.path();
