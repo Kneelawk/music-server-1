@@ -32,6 +32,7 @@ serde_json = "^1.0.62"
 sha2 = "^0.9.2"
 toml = "^0.5.8"
 uuid = "^0.8.2"
+vsprintf = "^2.0.0"
 walkdir = "^2.3.1"
 
 [dependencies.log4rs]

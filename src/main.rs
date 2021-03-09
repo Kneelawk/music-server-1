@@ -19,6 +19,7 @@ use crate::{
     cdn::index::Index,
     config::Config,
     error::{Result, ResultExt},
+    util::ffmpeg,
 };
 use actix_web::{middleware::DefaultHeaders, web::Data, App, HttpServer};
 use std::process::exit;
@@ -34,6 +35,7 @@ async fn run() -> Result<()> {
 
     let base_dir = config.base_dir.clone();
 
+    ffmpeg::init_ffmpeg()?;
     let index = Index::index(
         &base_dir,
         FILES_URL,

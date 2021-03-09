@@ -1,3 +1,5 @@
+pub mod ffmpeg;
+
 // Result wrapper functions
 
 pub fn w_err<T>(t: T) -> Result<(), T> {

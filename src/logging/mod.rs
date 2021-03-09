@@ -1,8 +1,11 @@
 mod fancy_file;
+mod ffmpeg;
 
 use crate::logging::fancy_file::FancyFileAppenderDeserializer;
 use log4rs::config::Deserializers;
 use std::{fs::OpenOptions, io::Write, path::Path};
+
+pub use ffmpeg::log_callback;
 
 const DEFAULT_CONFIG_FILE: &str = "music-server-1.log4rs.yaml";
 const DEFAULT_CONFIG: &[u8] = include_bytes!("default.log4rs.yaml");

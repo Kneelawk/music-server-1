@@ -3,9 +3,7 @@ use crate::{
     util::w_ok,
 };
 use actix_web::{dev::HttpResponseBuilder, http::StatusCode, web, HttpResponse, Scope};
-use ffmpeg4::{
-    format, frame, media, software, DictionaryRef,
-};
+use ffmpeg4::{format, frame, media, software, DictionaryRef};
 use futures::{stream, StreamExt};
 use image::ColorType;
 use path_slash::PathExt;
